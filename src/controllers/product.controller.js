@@ -1,4 +1,7 @@
 const { Op } = require('sequelize');
+const fs = require('fs');
+const path = require('path');
+const { uploadDir } = require('../middlewares/upload.middleware');
 const { sequelize, Product, ProductVariation, Category, Media, InventoryMovement, VendorProfile } = require('../models');
 
 // Helper to generate SKU: "QT-PLAT-COND-ID-RAND"
@@ -351,14 +354,25 @@ const getProducts = async (req, res, next) => {
     const variationInclude = {
       model: ProductVariation,
       as: 'variations',
-      where: {}
+      required: false,
+      separate: lowStock !== 'true',
     };
 
     if (lowStock === 'true') {
-      variationInclude.where.stockQuantity = {
-        [Op.lte]: sequelize.col('variations.low_stock_threshold')
+      variationInclude.where = {
+        stockQuantity: {
+          [Op.lte]: sequelize.col('variations.low_stock_threshold')
+        }
       };
+      variationInclude.required = true;
     }
+
+    const mediaInclude = {
+      model: Media,
+      as: 'media',
+      separate: true,
+      order: [['orderIndex', 'ASC'], ['createdAt', 'ASC']],
+    };
 
     // Calculate pagination values
     const queryLimit = parseInt(limit);
@@ -373,7 +387,7 @@ const getProducts = async (req, res, next) => {
       distinct: true, // ensures correct count when including relations
       include: [
         variationInclude,
-        { model: Media, as: 'media' },
+        mediaInclude,
         { model: Category, as: 'category' },
         { model: VendorProfile, as: 'vendor', attributes: ['companyName'] }
       ]
@@ -397,7 +411,7 @@ const getProductById = async (req, res, next) => {
     const product = await Product.findByPk(id, {
       include: [
         { model: ProductVariation, as: 'variations' },
-        { model: Media, as: 'media' },
+        { model: Media, as: 'media', order: [['orderIndex', 'ASC'], ['createdAt', 'ASC']] },
         { model: Category, as: 'category' },
         { model: VendorProfile, as: 'vendor' }
       ]
@@ -564,7 +578,10 @@ const uploadProductMedia = async (req, res, next) => {
     const fileUrl = `/uploads/${req.file.filename}`;
 
     // If setting featured, turn off other featured images for this product
-    if (isFeatured === 'true') {
+    const existingMediaCount = await Media.count({ where: { productId } });
+    const shouldFeature = isFeatured === 'true' || existingMediaCount === 0;
+
+    if (shouldFeature) {
       await Media.update({ isFeatured: false }, { where: { productId } });
     }
 
@@ -572,8 +589,8 @@ const uploadProductMedia = async (req, res, next) => {
       productId,
       url: fileUrl,
       type: type || 'Image',
-      isFeatured: isFeatured === 'true',
-      orderIndex: orderIndex ? parseInt(orderIndex) : 0
+      isFeatured: shouldFeature,
+      orderIndex: orderIndex ? parseInt(orderIndex) : existingMediaCount
     });
 
     res.status(201).json({ success: true, data: media });
@@ -596,10 +613,9 @@ const deleteMedia = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
-    // Optionally delete from local filesystem
-    const fs = require('fs');
-    const path = require('path');
-    const localFilePath = path.join(__dirname, '../../public', media.url);
+    // Delete file from local filesystem
+    const filename = path.basename(media.url);
+    const localFilePath = path.join(uploadDir, filename);
     if (fs.existsSync(localFilePath)) {
       fs.unlinkSync(localFilePath);
     }

@@ -61,18 +61,129 @@ const getVendorById = async (req, res, next) => {
   }
 };
 
+// @desc    Create a new vendor/supplier (Admin)
+// @route   POST /api/vendors
+// @access  Private (Admin/Super Admin)
+const createVendor = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { name, email, password, phoneNumber, companyName, contactPerson, address, status } = req.body;
+
+    if (!name || !email || !password || !companyName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email, password and company name are required'
+      });
+    }
+
+    const userExists = await User.findOne({ where: { email }, transaction });
+    if (userExists) {
+      return res.status(400).json({ success: false, message: 'Email already registered' });
+    }
+
+    const user = await User.create({
+      name,
+      email,
+      password,
+      role: 'Vendor',
+      phoneNumber: phoneNumber || null,
+      isActive: true
+    }, { transaction });
+
+    const vendorProfile = await VendorProfile.create({
+      userId: user.id,
+      companyName,
+      contactPerson: contactPerson || name,
+      email,
+      phone: phoneNumber || null,
+      address: address || null,
+      status: status || 'Active'
+    }, { transaction });
+
+    await transaction.commit();
+
+    res.status(201).json({
+      success: true,
+      message: 'Supplier created successfully',
+      data: {
+        ...vendorProfile.toJSON(),
+        user: { id: user.id, name: user.name, isActive: user.isActive }
+      }
+    });
+  } catch (error) {
+    await transaction.rollback();
+    next(error);
+  }
+};
+
 // @desc    Update a vendor details/status
 // @route   PUT /api/vendors/:id
 // @access  Private (Admin/Super Admin)
 const updateVendor = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
   try {
     const { id } = req.params;
-    const vendor = await VendorProfile.findByPk(id);
+    const { companyName, contactPerson, email, phone, address, status, name, phoneNumber, isActive } = req.body;
+
+    const vendor = await VendorProfile.findByPk(id, {
+      include: [{ model: User, as: 'user' }],
+      transaction
+    });
     if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
 
-    await vendor.update(req.body);
-    res.json({ success: true, message: 'Vendor updated successfully', data: vendor });
+    const vendorUpdates = {};
+    if (companyName !== undefined) vendorUpdates.companyName = companyName;
+    if (contactPerson !== undefined) vendorUpdates.contactPerson = contactPerson;
+    if (email !== undefined) vendorUpdates.email = email;
+    if (phone !== undefined) vendorUpdates.phone = phone;
+    if (address !== undefined) vendorUpdates.address = address;
+    if (status !== undefined) vendorUpdates.status = status;
+
+    if (Object.keys(vendorUpdates).length > 0) {
+      await vendor.update(vendorUpdates, { transaction });
+    }
+
+    const userUpdates = {};
+    if (name !== undefined) userUpdates.name = name;
+    if (email !== undefined) userUpdates.email = email;
+    if (phoneNumber !== undefined) userUpdates.phoneNumber = phoneNumber;
+    else if (phone !== undefined) userUpdates.phoneNumber = phone;
+    if (isActive !== undefined) userUpdates.isActive = isActive;
+
+    if (Object.keys(userUpdates).length > 0) {
+      await vendor.user.update(userUpdates, { transaction });
+    }
+
+    await transaction.commit();
+
+    const updated = await VendorProfile.findByPk(id, {
+      include: [{ model: User, as: 'user', attributes: ['id', 'name', 'isActive'] }]
+    });
+
+    res.json({ success: true, message: 'Vendor updated successfully', data: updated });
   } catch (error) {
+    await transaction.rollback();
+    next(error);
+  }
+};
+
+// @desc    Delete a vendor/supplier
+// @route   DELETE /api/vendors/:id
+// @access  Private (Admin/Super Admin)
+const deleteVendor = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+
+    const vendor = await VendorProfile.findByPk(id, { transaction });
+    if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
+
+    await User.destroy({ where: { id: vendor.userId }, transaction });
+
+    await transaction.commit();
+    res.json({ success: true, message: 'Supplier deleted successfully' });
+  } catch (error) {
+    await transaction.rollback();
     next(error);
   }
 };
@@ -205,7 +316,9 @@ const getVendorDashboard = async (req, res, next) => {
 module.exports = {
   getVendors,
   getVendorById,
+  createVendor,
   updateVendor,
+  deleteVendor,
   settlePayout,
   getVendorDashboard
 };

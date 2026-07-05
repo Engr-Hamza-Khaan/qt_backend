@@ -388,10 +388,71 @@ const updateOrderStatus = async (req, res, next) => {
   }
 };
 
+// @desc    Delete an order
+// @route   DELETE /api/orders/:id
+// @access  Private (Admin/Super Admin/Staff)
+const deleteOrder = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+
+    const order = await Order.findByPk(id, {
+      include: [{ model: OrderItem, as: 'items' }],
+      transaction
+    });
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+
+    for (const item of order.items) {
+      if (item.vendorId && item.costPrice && item.fulfillmentStatus === 'Assigned') {
+        const vendor = await VendorProfile.findByPk(item.vendorId, { transaction });
+        const variation = await ProductVariation.findByPk(item.variationId, { transaction });
+
+        if (variation) {
+          const prevStock = variation.stockQuantity;
+          const newStock = prevStock + item.quantity;
+          variation.stockQuantity = newStock;
+          await variation.save({ transaction });
+
+          await InventoryMovement.create({
+            variationId: variation.id,
+            quantityChanged: item.quantity,
+            previousStock: prevStock,
+            newStock,
+            type: 'Return',
+            notes: `Stock restored after deleting Order ${order.orderNumber}`,
+            userId: req.user.id,
+            vendorId: item.vendorId
+          }, { transaction });
+        }
+
+        if (vendor) {
+          const reversal = item.quantity * parseFloat(item.costPrice);
+          vendor.balance = parseFloat(vendor.balance) - reversal;
+          await vendor.save({ transaction });
+        }
+      }
+    }
+
+    await SupplierLedger.destroy({
+      where: { referenceId: order.id },
+      transaction
+    });
+
+    await order.destroy({ transaction });
+    await transaction.commit();
+
+    res.json({ success: true, message: 'Order deleted successfully' });
+  } catch (error) {
+    await transaction.rollback();
+    next(error);
+  }
+};
+
 module.exports = {
   createOrder,
   assignSupplier,
   getOrders,
   getOrderById,
-  updateOrderStatus
+  updateOrderStatus,
+  deleteOrder
 };

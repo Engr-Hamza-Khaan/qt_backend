@@ -12,8 +12,9 @@ const Media = sequelize.define('Media', {
     allowNull: false
   },
   url: {
-    type: DataTypes.STRING,
-    allowNull: false
+    type: DataTypes.TEXT,
+    allowNull: false,
+    comment: 'File path, external URL, or base64 data URI'
   },
   type: {
     type: DataTypes.ENUM('Image', 'Video', 'Trailer'),

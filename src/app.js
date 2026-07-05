@@ -12,8 +12,10 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 
-// Secure HTTP headers
-app.use(helmet());
+// Secure HTTP headers (allow cross-origin images for admin/store frontends)
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 
 // Global Rate Limiting for API routes
 const apiLimiter = rateLimit({
@@ -47,7 +49,15 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 // Serve uploaded static files
-app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
+app.use(
+  '/uploads',
+  (req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    next();
+  },
+  express.static(path.join(__dirname, '../public/uploads'))
+);
 
 // Swagger UI Route
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));

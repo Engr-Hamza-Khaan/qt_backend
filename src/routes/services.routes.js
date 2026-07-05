@@ -10,6 +10,8 @@ const {
   getChatConversations,
   getChatById,
   replyToChat,
+  getChatSettings,
+  getChatBySession,
   customerSendMessage
 } = require('../controllers/services.controller');
 const { protect } = require('../middlewares/auth.middleware');
@@ -36,14 +38,16 @@ router.put('/sell/:id', protect, authorize('Admin', 'Super Admin', 'Staff'), upd
 // ==========================================
 // CHATBOT & CUSTOMER DIALOGUE
 // ==========================================
+// Public chatbot endpoints (must be before /chats/:id)
+router.get('/chat-settings', getChatSettings);
+router.get('/chats/session/:sessionId', getChatBySession);
+router.post('/chats/message', customerSendMessage);
+
 router.route('/chats')
   .get(protect, authorize('Admin', 'Super Admin', 'Staff'), getChatConversations);
 
 router.route('/chats/:id')
   .get(protect, authorize('Admin', 'Super Admin', 'Staff'), getChatById)
   .post(protect, authorize('Admin', 'Super Admin', 'Staff'), replyToChat); // Admin reply
-
-// Customer side chat socket/HTTP endpoint
-router.post('/chats/message', customerSendMessage);
 
 module.exports = router;

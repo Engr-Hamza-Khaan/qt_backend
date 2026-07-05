@@ -304,6 +304,23 @@ const seedDatabase = async () => {
       }
     });
 
+    await WebsiteSetting.create({
+      key: 'chatbot_business_hours',
+      value: {
+        display: 'Mon–Fri 9am–6pm, Sat 10am–4pm (PKT)',
+        offlineMessage: "We're currently offline. Leave us a message and our team will respond during business hours.",
+        schedule: {
+          monday: { enabled: true, open: '09:00', close: '18:00' },
+          tuesday: { enabled: true, open: '09:00', close: '18:00' },
+          wednesday: { enabled: true, open: '09:00', close: '18:00' },
+          thursday: { enabled: true, open: '09:00', close: '18:00' },
+          friday: { enabled: true, open: '09:00', close: '18:00' },
+          saturday: { enabled: true, open: '10:00', close: '16:00' },
+          sunday: { enabled: false, open: '09:00', close: '18:00' },
+        },
+      },
+    });
+
     console.log('-> Website setting variables seeded');
 
     // 8. Seed Discounts

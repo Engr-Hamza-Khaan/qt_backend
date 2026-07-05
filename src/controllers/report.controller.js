@@ -13,9 +13,13 @@ const getDashboardSummary = async (req, res, next) => {
     const totalCustomersCount = await User.count({ where: { role: 'Customer' } });
     const totalVendorsCount = await VendorProfile.count({ where: { status: 'Active' } });
 
-    // 2. Total products sold quantity
+    // 2. Total products sold quantity (subquery avoids Sequelize sum+include GROUP BY bug)
     const totalProductsSold = await OrderItem.sum('quantity', {
-      include: [{ model: Order, as: 'order', where: { paymentStatus: 'Paid' } }]
+      where: {
+        orderId: {
+          [Op.in]: sequelize.literal(`(SELECT id FROM orders WHERE payment_status = 'Paid')`)
+        }
+      }
     }) || 0;
 
     // 3. Recent orders
@@ -36,28 +40,30 @@ const getDashboardSummary = async (req, res, next) => {
     });
 
     // 5. Best selling products (grouped by variation/product)
+    // Filter paid orders via subquery — including Order in GROUP BY queries causes
+    // PostgreSQL errors because Sequelize selects order.id outside aggregates.
     const bestSellers = await OrderItem.findAll({
       attributes: [
         'variationId',
         [sequelize.fn('SUM', sequelize.col('OrderItem.quantity')), 'soldQuantity'],
-        [sequelize.fn('SUM', sequelize.literal('OrderItem.quantity * OrderItem.price')), 'totalSales']
+        [sequelize.fn('SUM', sequelize.literal('"OrderItem"."quantity" * "OrderItem"."price"')), 'totalSales']
       ],
+      where: {
+        orderId: {
+          [Op.in]: sequelize.literal(`(SELECT id FROM orders WHERE payment_status = 'Paid')`)
+        }
+      },
       include: [
         {
           model: ProductVariation,
           as: 'variation',
           include: [{ model: Product, as: 'product', attributes: ['title'] }]
-        },
-        {
-          model: Order,
-          as: 'order',
-          where: { paymentStatus: 'Paid' },
-          attributes: []
         }
       ],
-      group: ['variationId', 'variation.id', 'variation->product.id'],
-      order: [[sequelize.literal('soldQuantity'), 'DESC']],
-      limit: 5
+      group: ['OrderItem.variation_id', 'variation.id', 'variation->product.id'],
+      order: [[sequelize.literal('"soldQuantity"'), 'DESC']],
+      limit: 5,
+      subQuery: false
     });
 
     // 6. Sales trend (Last 30 Days)

@@ -149,6 +149,60 @@ const replyToChat = async (req, res, next) => {
   }
 };
 
+const DEFAULT_BUSINESS_HOURS = {
+  monday: { enabled: true, open: '09:00', close: '18:00' },
+  tuesday: { enabled: true, open: '09:00', close: '18:00' },
+  wednesday: { enabled: true, open: '09:00', close: '18:00' },
+  thursday: { enabled: true, open: '09:00', close: '18:00' },
+  friday: { enabled: true, open: '09:00', close: '18:00' },
+  saturday: { enabled: true, open: '10:00', close: '16:00' },
+  sunday: { enabled: false, open: '09:00', close: '18:00' },
+};
+
+const getChatSettings = async (req, res, next) => {
+  try {
+    const [welcomeSetting, hoursSetting] = await Promise.all([
+      WebsiteSetting.findOne({ where: { key: 'chatbot_welcome_message' } }),
+      WebsiteSetting.findOne({ where: { key: 'chatbot_business_hours' } }),
+    ]);
+
+    const hoursValue = hoursSetting?.value || {};
+
+    res.json({
+      success: true,
+      data: {
+        welcomeMessage:
+          welcomeSetting?.value?.text ||
+          'Hello! How can we assist you today?',
+        businessHoursDisplay:
+          hoursValue.display ||
+          'Mon–Fri 9am–6pm, Sat 10am–4pm',
+        offlineMessage:
+          hoursValue.offlineMessage ||
+          "We're currently offline. Leave us a message and we'll respond during business hours.",
+        schedule: hoursValue.schedule || DEFAULT_BUSINESS_HOURS,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getChatBySession = async (req, res, next) => {
+  try {
+    const { sessionId } = req.params;
+    const chat = await ChatConversation.findOne({ where: { customerSessionId: sessionId } });
+
+    if (!chat) {
+      return res.json({ success: true, data: null });
+    }
+
+    res.json({ success: true, data: chat });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Customer writes to the chat (interacts with Bot or Agent)
 const customerSendMessage = async (req, res, next) => {
   try {
@@ -212,5 +266,7 @@ module.exports = {
   getChatConversations,
   getChatById,
   replyToChat,
+  getChatSettings,
+  getChatBySession,
   customerSendMessage
 };

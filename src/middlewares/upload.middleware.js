@@ -2,40 +2,50 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Ensure upload directory exists
 const uploadDir = path.join(__dirname, '../../public/uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Set up storage engine
+const allowedExtensions = /\.(jpeg|jpg|png|gif|webp|bmp|svg|heic|heif|mp4|mov|avi|mkv|webm)$/i;
+
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
+  destination(req, file, cb) {
     cb(null, uploadDir);
   },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
+  filename(req, file, cb) {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+    cb(null, `file-${uniqueSuffix}${ext}`);
+  },
 });
 
-// File validation filter
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|mp4|mov|avi|mkv|webm/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
+  const hasAllowedExtension = allowedExtensions.test(file.originalname);
+  const hasAllowedMime =
+    file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/');
 
-  if (extname && mimetype) {
+  if (hasAllowedExtension || hasAllowedMime) {
     cb(null, true);
-  } else {
-    cb(new Error('Only images and video files are allowed!'), false);
+    return;
   }
+
+  cb(new Error('Only image and video files are allowed (jpg, png, gif, webp, etc.)'));
 };
 
 const upload = multer({
-  storage: storage,
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max limit
-  fileFilter: fileFilter
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter,
 });
 
+const handleUpload = (fieldName = 'file') => (req, res, next) => {
+  upload.single(fieldName)(req, res, (err) => {
+    if (err) return next(err);
+    next();
+  });
+};
+
 module.exports = upload;
+module.exports.handleUpload = handleUpload;
+module.exports.uploadDir = uploadDir;

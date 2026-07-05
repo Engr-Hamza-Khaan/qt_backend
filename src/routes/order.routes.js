@@ -5,7 +5,8 @@ const {
   assignSupplier,
   getOrders,
   getOrderById,
-  updateOrderStatus
+  updateOrderStatus,
+  deleteOrder
 } = require('../controllers/order.controller');
 const { protect } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
@@ -16,7 +17,8 @@ router.route('/')
 
 router.route('/:id')
   .get(protect, getOrderById)
-  .put(protect, authorize('Admin', 'Super Admin', 'Staff'), updateOrderStatus);
+  .put(protect, authorize('Admin', 'Super Admin', 'Staff'), updateOrderStatus)
+  .delete(protect, authorize('Admin', 'Super Admin', 'Staff'), deleteOrder);
 
 router.post('/:orderId/items/:itemId/assign-supplier', protect, authorize('Admin', 'Super Admin'), assignSupplier);
 

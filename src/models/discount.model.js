@@ -26,7 +26,7 @@ const Discount = sequelize.define('Discount', {
   value: {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: false,
-    comment: 'e.g. 15.00 for 15% or $15'
+    comment: 'e.g. 15.00 for 15% or Rs 15'
   },
   applyTo: {
     type: DataTypes.ENUM('All', 'Category', 'Product', 'Variation'),

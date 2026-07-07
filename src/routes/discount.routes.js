@@ -10,6 +10,9 @@ const {
 const { protect } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
 
+// Public checkout endpoint — must be before /:id routes
+router.post('/validate', validateCoupon);
+
 router.route('/')
   .post(protect, authorize('Admin', 'Super Admin'), createDiscount)
   .get(protect, authorize('Admin', 'Super Admin', 'Staff'), getDiscounts);
@@ -17,8 +20,5 @@ router.route('/')
 router.route('/:id')
   .put(protect, authorize('Admin', 'Super Admin'), updateDiscount)
   .delete(protect, authorize('Admin', 'Super Admin'), deleteDiscount);
-
-// Public/Checkout endpoint to apply coupon code
-router.post('/validate', validateCoupon);
 
 module.exports = router;

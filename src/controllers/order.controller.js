@@ -1,5 +1,6 @@
 const { Op } = require('sequelize');
 const { sequelize, Order, OrderItem, ProductVariation, Product, VendorProfile, SupplierLedger, InventoryMovement, User } = require('../models');
+const { validateAndApplyCoupon } = require('../utils/discount.service');
 
 // Helper to generate Shopify-style order number: "QT-10001" etc.
 const generateOrderNumber = async () => {
@@ -51,8 +52,33 @@ const createOrder = async (req, res, next) => {
       });
     }
 
-    // Apply discount
-    const finalDiscount = discountAmount ? parseFloat(discountAmount) : 0;
+    let finalDiscount = 0;
+    let appliedCouponCode = couponCode || null;
+
+    if (couponCode) {
+      try {
+        const couponResult = await validateAndApplyCoupon({
+          code: couponCode,
+          cartAmount: totalAmount,
+          items,
+        });
+        finalDiscount = couponResult.discountAmount;
+        appliedCouponCode = couponResult.discount.code;
+      } catch (couponError) {
+        await transaction.rollback();
+        return res.status(couponError.statusCode || 400).json({
+          success: false,
+          message: couponError.message,
+        });
+      }
+    } else if (discountAmount && parseFloat(discountAmount) > 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'A valid coupon code is required to apply a discount',
+      });
+    }
+
     const totalWithDiscount = Math.max(0, totalAmount - finalDiscount);
 
     const order = await Order.create({
@@ -60,7 +86,7 @@ const createOrder = async (req, res, next) => {
       customerId: req.user.id,
       totalAmount: totalWithDiscount,
       discountAmount: finalDiscount,
-      couponCode,
+      couponCode: appliedCouponCode,
       shippingAddress,
       billingAddress,
       paymentMethod,

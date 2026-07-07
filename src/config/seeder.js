@@ -27,23 +27,23 @@ const seedDatabase = async () => {
       isActive: true
     });
 
-    const staffUser = await User.create({
-      name: 'Staff Clerk',
-      email: 'staff@quickturn.com',
-      password: 'staffpassword123',
-      role: 'Staff',
-      phoneNumber: '+1222333444',
-      isActive: true
-    });
+    // const staffUser = await User.create({
+    //   name: 'Staff Clerk',
+    //   email: 'staff@quickturn.com',
+    //   password: 'staffpassword123',
+    //   role: 'Staff',
+    //   phoneNumber: '+1222333444',
+    //   isActive: true
+    // });
 
-    const vendorUser1 = await User.create({
-      name: 'Sony Supplier',
-      email: 'sony@supplier.com',
-      password: 'vendorpassword123',
-      role: 'Vendor',
-      phoneNumber: '+1888777666',
-      isActive: true
-    });
+    // const vendorUser1 = await User.create({
+    //   name: 'Sony Supplier',
+    //   email: 'sony@supplier.com',
+    //   password: 'vendorpassword123',
+    //   role: 'Vendor',
+    //   phoneNumber: '+1888777666',
+    //   isActive: true
+    // });
 
     const vendorUser2 = await User.create({
       name: 'Retro Gaming Inc',
@@ -54,30 +54,30 @@ const seedDatabase = async () => {
       isActive: true
     });
 
-    const customerUser = await User.create({
-      name: 'John Doe',
-      email: 'customer@gmail.com',
-      password: 'customerpassword123',
-      role: 'Customer',
-      phoneNumber: '+1555444333',
-      isActive: true
-    });
+    // const customerUser = await User.create({
+    //   name: 'John Doe',
+    //   email: 'customer@gmail.com',
+    //   password: 'customerpassword123',
+    //   role: 'Customer',
+    //   phoneNumber: '+1555444333',
+    //   isActive: true
+    // });
 
     console.log('-> Users seeded');
 
     // 2. Seed Vendor Profiles
-    const sonyVendor = await VendorProfile.create({
-      userId: vendorUser1.id,
-      companyName: 'Sony Interactive Distribution',
-      contactPerson: 'Alex Mercer',
-      email: 'sony@supplier.com',
-      phone: '+1888777666',
-      address: '100 Playstation Way, California',
-      balance: 1500.00,
-      pendingPayments: 0.00,
-      paidPayments: 4500.00,
-      status: 'Active'
-    });
+    // const sonyVendor = await VendorProfile.create({
+    //   userId: vendorUser1.id,
+    //   companyName: 'Sony Interactive Distribution',
+    //   contactPerson: 'Alex Mercer',
+    //   email: 'sony@supplier.com',
+    //   phone: '+1888777666',
+    //   address: '100 Playstation Way, California',
+    //   balance: 1500.00,
+    //   pendingPayments: 0.00,
+    //   paidPayments: 4500.00,
+    //   status: 'Active'
+    // });
 
     const retroVendor = await VendorProfile.create({
       userId: vendorUser2.id,
@@ -291,7 +291,7 @@ const seedDatabase = async () => {
     await WebsiteSetting.create({
       key: 'notification_bar',
       value: {
-        text: '🚚 Free shipping on orders over $150! | Summer Sale Active Now!',
+        text: '🚚 Free shipping on orders over Rs 150! | Summer Sale Active Now!',
         color: '#E11D48',
         active: true
       }
@@ -330,7 +330,7 @@ const seedDatabase = async () => {
       type: 'Percentage',
       value: 10.00,
       applyTo: 'All',
-      minPurchaseAmount: 50.00,
+      minPurchaseAmount: 0.00,
       startDate: new Date(),
       endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
       isActive: true

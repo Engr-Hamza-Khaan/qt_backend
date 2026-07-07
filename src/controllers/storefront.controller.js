@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { Op } = require('sequelize');
+const { validateAndApplyCoupon } = require('../utils/discount.service');
 const {
   sequelize,
   Product,
@@ -321,15 +322,42 @@ const guestCheckout = async (req, res, next) => {
     }
 
     const finalDiscount = discountAmount ? parseFloat(discountAmount) : 0;
-    const totalWithDiscount = Math.max(0, totalAmount - finalDiscount);
+    let appliedCouponCode = couponCode || null;
+    let validatedDiscount = finalDiscount;
+
+    if (couponCode) {
+      try {
+        const couponResult = await validateAndApplyCoupon({
+          code: couponCode,
+          cartAmount: totalAmount,
+          items,
+        });
+        validatedDiscount = couponResult.discountAmount;
+        appliedCouponCode = couponResult.discount.code;
+      } catch (couponError) {
+        await transaction.rollback();
+        return res.status(couponError.statusCode || 400).json({
+          success: false,
+          message: couponError.message,
+        });
+      }
+    } else if (finalDiscount > 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'A valid coupon code is required to apply a discount',
+      });
+    }
+
+    const totalWithDiscount = Math.max(0, totalAmount - validatedDiscount);
 
     const order = await Order.create(
       {
         orderNumber,
         customerId: customer.id,
         totalAmount: totalWithDiscount,
-        discountAmount: finalDiscount,
-        couponCode,
+        discountAmount: validatedDiscount,
+        couponCode: appliedCouponCode,
         shippingAddress: { ...shippingAddress, guestEmail: guest.email, guestName: guest.name },
         billingAddress,
         paymentMethod: paymentMethod || 'Credit Card',

@@ -1,5 +1,15 @@
 const { Op } = require('sequelize');
-const { sequelize, User, VendorProfile, SupplierLedger, OrderItem, ProductVariation, Product, InventoryMovement } = require('../models');
+const {
+  sequelize,
+  User,
+  VendorProfile,
+  SupplierLedger,
+  OrderItem,
+  ProductVariation,
+  Product,
+  InventoryMovement,
+  Order
+} = require('../models');
 
 // ==========================================
 // ADMIN WORKFLOWS FOR VENDORS
@@ -208,7 +218,7 @@ const settlePayout = async (req, res, next) => {
     if (parseFloat(vendor.balance) < payoutVal) {
       return res.status(400).json({
         success: false,
-        message: `Insufficient balance. Owed balance: $${vendor.balance}, attempting to pay: $${payoutVal}`
+        message: `Insufficient balance. Owed balance: Rs ${vendor.balance}, attempting to pay: Rs ${payoutVal}`
       });
     }
 
@@ -250,62 +260,172 @@ const getVendorDashboard = async (req, res, next) => {
 
     const vendorId = req.user.vendorProfile.id;
 
-    // Total products supplied
-    const totalProducts = await Product.count({ where: { vendorId } });
-
-    // Sum of stock levels
-    const variations = await ProductVariation.findAll({
-      include: [{
-        model: Product,
-        as: 'product',
-        where: { vendorId }
-      }]
+    const vendor = await VendorProfile.findByPk(vendorId, {
+      include: [{ model: User, as: 'user', attributes: ['id', 'name', 'email'] }]
     });
+
+    const [
+      totalProducts,
+      variations,
+      earningsSum,
+      totalSold,
+      monthlyEarnings,
+      recentOrders,
+      recentLedger,
+      lowStockAlerts,
+      bestSellers
+    ] = await Promise.all([
+      Product.count({ where: { vendorId } }),
+
+      ProductVariation.findAll({
+        include: [{
+          model: Product,
+          as: 'product',
+          where: { vendorId },
+          attributes: []
+        }]
+      }),
+
+      SupplierLedger.sum('amount', {
+        where: { vendorId, type: 'Sale Credit' }
+      }),
+
+      OrderItem.sum('quantity', { where: { vendorId } }),
+
+      SupplierLedger.findAll({
+        where: {
+          vendorId,
+          type: 'Sale Credit',
+          createdAt: {
+            [Op.gte]: new Date(new Date().setDate(new Date().getDate() - 30))
+          }
+        },
+        attributes: [
+          [sequelize.fn('date_trunc', 'day', sequelize.col('created_at')), 'date'],
+          [sequelize.fn('sum', sequelize.col('amount')), 'earnings']
+        ],
+        group: [sequelize.fn('date_trunc', 'day', sequelize.col('created_at'))],
+        order: [[sequelize.fn('date_trunc', 'day', sequelize.col('created_at')), 'ASC']]
+      }),
+
+      Order.findAll({
+        order: [['createdAt', 'DESC']],
+        limit: 5,
+        include: [
+          {
+            model: OrderItem,
+            as: 'items',
+            where: { vendorId },
+            required: true,
+            include: [{
+              model: ProductVariation,
+              as: 'variation',
+              include: [{ model: Product, as: 'product', attributes: ['title'] }]
+            }]
+          },
+          {
+            model: User,
+            as: 'customer',
+            attributes: ['id', 'name', 'email']
+          }
+        ]
+      }),
+
+      SupplierLedger.findAll({
+        where: { vendorId },
+        order: [['createdAt', 'DESC']],
+        limit: 10
+      }),
+
+      ProductVariation.findAll({
+        where: {
+          stockQuantity: { [Op.lte]: sequelize.col('low_stock_threshold') },
+          isActive: true
+        },
+        include: [{
+          model: Product,
+          as: 'product',
+          where: { vendorId },
+          attributes: ['id', 'title']
+        }],
+        order: [['stockQuantity', 'ASC']],
+        limit: 10
+      }),
+
+      OrderItem.findAll({
+        attributes: [
+          'variationId',
+          [sequelize.fn('SUM', sequelize.col('OrderItem.quantity')), 'soldQuantity'],
+          [sequelize.fn('SUM', sequelize.literal('"OrderItem"."quantity" * "OrderItem"."cost_price"')), 'totalEarnings']
+        ],
+        where: {
+          vendorId,
+          orderId: {
+            [Op.in]: sequelize.literal(`(SELECT id FROM orders WHERE payment_status = 'Paid')`)
+          }
+        },
+        include: [{
+          model: ProductVariation,
+          as: 'variation',
+          include: [{ model: Product, as: 'product', attributes: ['title'] }]
+        }],
+        group: ['OrderItem.variation_id', 'variation.id', 'variation->product.id'],
+        order: [[sequelize.literal('"soldQuantity"'), 'DESC']],
+        limit: 5,
+        subQuery: false
+      })
+    ]);
+
     const totalInventory = variations.reduce((sum, item) => sum + item.stockQuantity, 0);
 
-    // Earnings
-    const earningsSum = await SupplierLedger.sum('amount', {
-      where: { vendorId, type: 'Sale Credit' }
-    }) || 0;
+    const mappedOrders = recentOrders.map((order) => {
+      const vendorItems = order.items || [];
+      const vendorSubtotal = vendorItems.reduce(
+        (sum, item) => sum + parseFloat(item.costPrice || 0) * item.quantity,
+        0
+      );
 
-    // Total sales quantity
-    const totalSold = await OrderItem.sum('quantity', {
-      where: { vendorId }
-    }) || 0;
-
-    // Payout details
-    const totalPaid = req.user.vendorProfile.paidPayments;
-    const currentBalance = req.user.vendorProfile.balance;
-
-    // Monthly earnings
-    const monthlyEarnings = await SupplierLedger.findAll({
-      where: {
-        vendorId,
-        type: 'Sale Credit',
-        createdAt: {
-          [Op.gte]: new Date(new Date().setDate(new Date().getDate() - 30))
-        }
-      },
-      attributes: [
-        [sequelize.fn('date_trunc', 'day', sequelize.col('created_at')), 'date'],
-        [sequelize.fn('sum', sequelize.col('amount')), 'earnings']
-      ],
-      group: [sequelize.fn('date_trunc', 'day', sequelize.col('created_at'))],
-      order: [[sequelize.fn('date_trunc', 'day', sequelize.col('created_at')), 'ASC']]
+      return {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        orderStatus: order.orderStatus,
+        paymentStatus: order.paymentStatus,
+        createdAt: order.createdAt,
+        customer: order.customer,
+        vendorSubtotal,
+        itemCount: vendorItems.length,
+        items: vendorItems.map((item) => ({
+          quantity: item.quantity,
+          costPrice: item.costPrice,
+          productTitle: item.variation?.product?.title,
+          fulfillmentStatus: item.fulfillmentStatus
+        }))
+      };
     });
 
     res.json({
       success: true,
       data: {
+        vendor: {
+          id: vendor.id,
+          companyName: vendor.companyName,
+          status: vendor.status,
+          contactPerson: vendor.contactPerson,
+          user: vendor.user
+        },
         summary: {
           totalProducts,
           totalInventory,
-          totalSold,
-          totalEarnings: parseFloat(earningsSum),
-          totalPaid: parseFloat(totalPaid),
-          currentBalance: parseFloat(currentBalance)
+          totalSold: totalSold || 0,
+          totalEarnings: parseFloat(earningsSum || 0),
+          totalPaid: parseFloat(vendor.paidPayments || 0),
+          currentBalance: parseFloat(vendor.balance || 0)
         },
-        monthlyTrends: monthlyEarnings
+        monthlyTrends: monthlyEarnings,
+        recentOrders: mappedOrders,
+        recentLedger,
+        lowStockAlerts,
+        bestSellers
       }
     });
   } catch (error) {

@@ -40,6 +40,18 @@ const Product = sequelize.define('Product', {
     defaultValue: [],
     comment: 'Searchable tags for indexing and filters'
   },
+  aliases: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: [],
+    comment: 'Alternative names, abbreviations, and nicknames (e.g. GTA 5, RDR, BO6, PS5)'
+  },
+  keywords: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: [],
+    comment: 'Search keywords (e.g. rockstar, wild west, heist, shooter)'
+  },
   attributes: {
     type: DataTypes.JSON,
     allowNull: true,

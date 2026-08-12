@@ -79,6 +79,8 @@ const options = {
             storage: { type: 'string' },
             edition: { type: 'string' },
             platform: { type: 'string' },
+            condition: { type: 'string', enum: ['New', 'Used'] },
+            bundle: { type: 'string' },
             price: { type: 'number' },
             costPrice: { type: 'number' },
             stockQuantity: { type: 'integer' },

@@ -123,7 +123,20 @@ const getHomeData = async (req, res, next) => {
         categories,
         settings: {
           banners: bannersSetting?.value || {},
-          notification: notificationSetting?.value || {},
+          notification: {
+            active: true,
+            text: '🚚 Free shipping on orders over Rs 150! | Summer Sale Active Now!',
+            link: '/shop',
+            linkText: 'Shop Deals',
+            preset: 'neon-purple',
+            customBg: '#7c16c9',
+            textColor: '#ffffff',
+            dismissable: true,
+            showInAdmin: true,
+            icon: 'truck',
+            placement: 'top',
+            ...(notificationSetting?.value || {}),
+          },
         },
       },
     });
@@ -141,6 +154,8 @@ const getStoreProducts = async (req, res, next) => {
       categorySlug,
       platform,
       condition,
+      minPrice,
+      maxPrice,
       isFeatured,
       isBestSeller,
       isFlashSale,
@@ -169,17 +184,55 @@ const getStoreProducts = async (req, res, next) => {
     }
 
     if (search) {
-      const matchingCategories = await Category.findAll({
-        where: { name: { [Op.iLike]: `%${search}%` } },
-        attributes: ['id'],
-      });
+      const cleanSearch = search.trim();
+      const [matchingCategories, matchingVariations] = await Promise.all([
+        Category.findAll({
+          where: {
+            [Op.or]: [
+              { name: { [Op.iLike]: `%${cleanSearch}%` } },
+              { platform: { [Op.iLike]: `%${cleanSearch}%` } },
+            ],
+          },
+          attributes: ['id'],
+        }),
+        ProductVariation.findAll({
+          where: {
+            isActive: true,
+            [Op.or]: [
+              { sku: { [Op.iLike]: `%${cleanSearch}%` } },
+              { platform: { [Op.iLike]: `%${cleanSearch}%` } },
+              { edition: { [Op.iLike]: `%${cleanSearch}%` } },
+              { color: { [Op.iLike]: `%${cleanSearch}%` } },
+              { storage: { [Op.iLike]: `%${cleanSearch}%` } },
+              { bundle: { [Op.iLike]: `%${cleanSearch}%` } },
+              { condition: { [Op.iLike]: `%${cleanSearch}%` } },
+            ],
+          },
+          attributes: ['productId'],
+        }),
+      ]);
+
       const categoryIds = matchingCategories.map((c) => c.id);
+      const variationProductIds = matchingVariations.map((v) => v.productId);
 
       where[Op.or] = [
-        { title: { [Op.iLike]: `%${search}%` } },
-        { description: { [Op.iLike]: `%${search}%` } },
-        { modelNumber: { [Op.iLike]: `%${search}%` } },
+        { title: { [Op.iLike]: `%${cleanSearch}%` } },
+        { description: { [Op.iLike]: `%${cleanSearch}%` } },
+        { modelNumber: { [Op.iLike]: `%${cleanSearch}%` } },
+        sequelize.where(sequelize.cast(sequelize.col('Product.aliases'), 'text'), {
+          [Op.iLike]: `%${cleanSearch}%`,
+        }),
+        sequelize.where(sequelize.cast(sequelize.col('Product.keywords'), 'text'), {
+          [Op.iLike]: `%${cleanSearch}%`,
+        }),
+        sequelize.where(sequelize.cast(sequelize.col('Product.tags'), 'text'), {
+          [Op.iLike]: `%${cleanSearch}%`,
+        }),
+        sequelize.where(sequelize.cast(sequelize.col('Product.attributes'), 'text'), {
+          [Op.iLike]: `%${cleanSearch}%`,
+        }),
         ...(categoryIds.length ? [{ categoryId: { [Op.in]: categoryIds } }] : []),
+        ...(variationProductIds.length ? [{ id: { [Op.in]: variationProductIds } }] : []),
       ];
     }
     if (condition) where.condition = condition;
@@ -187,8 +240,45 @@ const getStoreProducts = async (req, res, next) => {
     if (isBestSeller === 'true') where.isBestSeller = true;
     if (isFlashSale === 'true') where.isFlashSale = true;
 
+    const hasMinPrice = minPrice !== undefined && minPrice !== '' && !isNaN(Number(minPrice));
+    const hasMaxPrice = maxPrice !== undefined && maxPrice !== '' && !isNaN(Number(maxPrice));
+
+    if (hasMinPrice || hasMaxPrice) {
+      const priceFilter = {};
+      if (hasMinPrice) priceFilter[Op.gte] = parseFloat(minPrice);
+      if (hasMaxPrice) priceFilter[Op.lte] = parseFloat(maxPrice);
+
+      const matchingPriceVariations = await ProductVariation.findAll({
+        where: {
+          isActive: true,
+          price: priceFilter,
+          ...(platform ? { platform } : {}),
+        },
+        attributes: ['productId'],
+        raw: true,
+      });
+
+      const matchingProductIds = [...new Set(matchingPriceVariations.map((v) => v.productId))];
+
+      if (where.id) {
+        const prevId = where.id;
+        delete where.id;
+        where[Op.and] = [
+          ...(where[Op.and] || []),
+          { id: prevId },
+          { id: { [Op.in]: matchingProductIds } },
+        ];
+      } else {
+        where.id = { [Op.in]: matchingProductIds };
+      }
+    }
+
     let sortOrder = [['createdAt', 'DESC']];
-    if (sortBy) sortOrder = [[sortBy, order === 'asc' ? 'ASC' : 'DESC']];
+    if (sortBy === 'price') {
+      sortOrder = [[{ model: ProductVariation, as: 'variations' }, 'price', order === 'desc' ? 'DESC' : 'ASC']];
+    } else if (sortBy) {
+      sortOrder = [[sortBy, order === 'asc' ? 'ASC' : 'DESC']];
+    }
 
     const queryLimit = parseInt(limit, 10);
     const queryOffset = (parseInt(page, 10) - 1) * queryLimit;

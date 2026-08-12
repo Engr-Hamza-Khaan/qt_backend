@@ -15,6 +15,7 @@ const Discount = require('./discount.model');
 const RepairRequest = require('./repair.model');
 const SellRequest = require('./sell.model');
 const ChatConversation = require('./chat.model');
+const SearchTerm = require('./searchTerm.model');
 
 // Define Relationships
 
@@ -91,5 +92,6 @@ module.exports = {
   Discount,
   RepairRequest,
   SellRequest,
-  ChatConversation
+  ChatConversation,
+  SearchTerm
 };

@@ -5,12 +5,13 @@ const { uploadDir } = require('../middlewares/upload.middleware');
 const { sequelize, Product, ProductVariation, Category, Media, InventoryMovement, VendorProfile } = require('../models');
 
 // Helper to generate SKU: "QT-PLAT-COND-ID-RAND"
-const generateSKU = (platform, condition, title) => {
+const generateSKU = (platform, condition, title, extra = '') => {
   const platCode = (platform || 'GEN').substring(0, 3).toUpperCase();
   const condCode = (condition || 'NEW').substring(0, 3).toUpperCase();
   const titleSlug = (title || 'PROD').substring(0, 3).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const extraCode = extra ? '-' + extra.substring(0, 4).replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : '';
   const randomPart = Math.floor(1000 + Math.random() * 9000);
-  return `${platCode}-${condCode}-${titleSlug}-${randomPart}`;
+  return `${platCode}-${condCode}-${titleSlug}${extraCode}-${randomPart}`;
 };
 
 // ==========================================
@@ -115,7 +116,9 @@ const addProduct = async (req, res, next) => {
       condition,
       modelNumber,
       categoryId,
-      tags: tags || [],
+      tags: Array.isArray(tags) ? tags : typeof tags === 'string' ? tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+      aliases: Array.isArray(req.body.aliases) ? req.body.aliases : typeof req.body.aliases === 'string' ? req.body.aliases.split(',').map((t) => t.trim()).filter(Boolean) : [],
+      keywords: Array.isArray(req.body.keywords) ? req.body.keywords : typeof req.body.keywords === 'string' ? req.body.keywords.split(',').map((t) => t.trim()).filter(Boolean) : [],
       attributes,
       dimensions,
       weight,
@@ -129,14 +132,17 @@ const addProduct = async (req, res, next) => {
     // Handle variations if provided
     if (variations && Array.isArray(variations)) {
       for (const val of variations) {
-        const generatedSku = val.sku || generateSKU(val.platform || attributes.platform || 'GEN', condition, title);
+        const varCondition = val.condition || condition || 'New';
+        const generatedSku = val.sku || generateSKU(val.platform || attributes?.platform || 'GEN', varCondition, title, val.storage || val.color || val.edition || val.bundle);
         const variation = await ProductVariation.create({
           productId: product.id,
           sku: generatedSku,
-          color: val.color,
-          storage: val.storage,
-          edition: val.edition,
-          platform: val.platform || attributes.platform,
+          color: val.color || null,
+          storage: val.storage || null,
+          edition: val.edition || null,
+          platform: val.platform || attributes?.platform || null,
+          condition: varCondition,
+          bundle: val.bundle || null,
           price: val.price,
           costPrice: val.costPrice || 0,
           stockQuantity: val.stockQuantity || 0,
@@ -188,7 +194,30 @@ const editProduct = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Not authorized to edit this product' });
     }
 
-    await product.update(req.body);
+    const updateData = { ...req.body };
+    if (updateData.tags !== undefined) {
+      updateData.tags = Array.isArray(updateData.tags)
+        ? updateData.tags
+        : typeof updateData.tags === 'string'
+        ? updateData.tags.split(',').map((t) => t.trim()).filter(Boolean)
+        : [];
+    }
+    if (updateData.aliases !== undefined) {
+      updateData.aliases = Array.isArray(updateData.aliases)
+        ? updateData.aliases
+        : typeof updateData.aliases === 'string'
+        ? updateData.aliases.split(',').map((t) => t.trim()).filter(Boolean)
+        : [];
+    }
+    if (updateData.keywords !== undefined) {
+      updateData.keywords = Array.isArray(updateData.keywords)
+        ? updateData.keywords
+        : typeof updateData.keywords === 'string'
+        ? updateData.keywords.split(',').map((t) => t.trim()).filter(Boolean)
+        : [];
+    }
+
+    await product.update(updateData);
     res.json({ success: true, data: product });
   } catch (error) {
     next(error);
@@ -240,6 +269,8 @@ const duplicateProduct = async (req, res, next) => {
       modelNumber: original.modelNumber,
       categoryId: original.categoryId,
       tags: original.tags,
+      aliases: original.aliases || [],
+      keywords: original.keywords || [],
       attributes: original.attributes,
       dimensions: original.dimensions,
       weight: original.weight,
@@ -252,7 +283,7 @@ const duplicateProduct = async (req, res, next) => {
 
     // Clone variations with new unique SKUs
     for (const v of original.variations) {
-      const newSku = generateSKU(v.platform, original.condition, clonedProduct.title);
+      const newSku = generateSKU(v.platform, v.condition || original.condition, clonedProduct.title, v.storage || v.color || v.edition || v.bundle);
       await ProductVariation.create({
         productId: clonedProduct.id,
         sku: newSku,
@@ -260,6 +291,8 @@ const duplicateProduct = async (req, res, next) => {
         storage: v.storage,
         edition: v.edition,
         platform: v.platform,
+        condition: v.condition || original.condition || 'New',
+        bundle: v.bundle || null,
         price: v.price,
         costPrice: v.costPrice,
         stockQuantity: 0, // Reset inventory for clone
@@ -318,9 +351,20 @@ const getProducts = async (req, res, next) => {
 
     // Search filter
     if (search) {
+      const cleanSearch = search.trim();
       where[Op.or] = [
-        { title: { [Op.iLike]: `%${search}%` } },
-        { description: { [Op.iLike]: `%${search}%` } }
+        { title: { [Op.iLike]: `%${cleanSearch}%` } },
+        { description: { [Op.iLike]: `%${cleanSearch}%` } },
+        { modelNumber: { [Op.iLike]: `%${cleanSearch}%` } },
+        sequelize.where(sequelize.cast(sequelize.col('Product.aliases'), 'text'), {
+          [Op.iLike]: `%${cleanSearch}%`,
+        }),
+        sequelize.where(sequelize.cast(sequelize.col('Product.keywords'), 'text'), {
+          [Op.iLike]: `%${cleanSearch}%`,
+        }),
+        sequelize.where(sequelize.cast(sequelize.col('Product.tags'), 'text'), {
+          [Op.iLike]: `%${cleanSearch}%`,
+        }),
       ];
     }
 
@@ -438,7 +482,7 @@ const addVariation = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   try {
     const { productId } = req.params;
-    const { color, storage, edition, platform, price, costPrice, stockQuantity, sku, lowStockThreshold } = req.body;
+    const { color, storage, edition, platform, condition, bundle, price, costPrice, stockQuantity, sku, lowStockThreshold, isActive } = req.body;
 
     const product = await Product.findByPk(productId);
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
@@ -448,19 +492,23 @@ const addVariation = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Not authorized to edit variations for this product' });
     }
 
-    const finalSku = sku || generateSKU(platform || 'GEN', product.condition, product.title);
+    const varCondition = condition || product.condition || 'New';
+    const finalSku = sku || generateSKU(platform || product.attributes?.platform || 'GEN', varCondition, product.title, storage || color || edition || bundle);
 
     const variation = await ProductVariation.create({
       productId,
       sku: finalSku,
-      color,
-      storage,
-      edition,
-      platform,
+      color: color || null,
+      storage: storage || null,
+      edition: edition || null,
+      platform: platform || product.attributes?.platform || null,
+      condition: varCondition,
+      bundle: bundle || null,
       price,
       costPrice: costPrice || 0,
       stockQuantity: stockQuantity || 0,
-      lowStockThreshold: lowStockThreshold || 5
+      lowStockThreshold: lowStockThreshold || 5,
+      isActive: isActive !== undefined ? isActive : true
     }, { transaction });
 
     if (variation.stockQuantity > 0) {
@@ -488,7 +536,7 @@ const updateVariation = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   try {
     const { variationId } = req.params;
-    const { price, costPrice, stockQuantity, color, storage, edition, platform, sku, lowStockThreshold, isActive } = req.body;
+    const { price, costPrice, stockQuantity, color, storage, edition, platform, condition, bundle, sku, lowStockThreshold, isActive } = req.body;
 
     const variation = await ProductVariation.findByPk(variationId, {
       include: [{ model: Product, as: 'product' }]
@@ -503,7 +551,7 @@ const updateVariation = async (req, res, next) => {
 
     const prevStock = variation.stockQuantity;
 
-    const updateFields = { price, costPrice, color, storage, edition, platform, sku, lowStockThreshold, isActive };
+    const updateFields = { price, costPrice, color, storage, edition, platform, condition, bundle, sku, lowStockThreshold, isActive };
     if (stockQuantity !== undefined) {
       updateFields.stockQuantity = stockQuantity;
     }

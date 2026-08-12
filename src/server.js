@@ -19,7 +19,10 @@ const startServer = async () => {
     console.log('Database connection has been established successfully.');
 
     // Synchronize models (alter schema to match models)
-    await sequelize.sync();
+    await sequelize.sync({ alter: true }).catch((err) => {
+      console.warn('Sync alter notice (falling back to standard sync):', err.message);
+      return sequelize.sync();
+    });
     console.log('Database tables synchronized successfully.');
 
     // Auto-seed database if empty

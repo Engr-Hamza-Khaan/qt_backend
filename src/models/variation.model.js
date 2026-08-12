@@ -33,7 +33,18 @@ const ProductVariation = sequelize.define('ProductVariation', {
   platform: {
     type: DataTypes.STRING,
     allowNull: true,
-    comment: 'e.g. PS5, PS4, Nintendo Switch'
+    comment: 'e.g. PS5, PS4, Nintendo Switch, Xbox Series X, PC'
+  },
+  condition: {
+    type: DataTypes.ENUM('New', 'Used'),
+    allowNull: true,
+    defaultValue: 'New',
+    comment: 'Condition variation: New or Used'
+  },
+  bundle: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Bundle variation: e.g. Console Only, Console + Extra Controller, Game + Steelbook'
   },
   price: {
     type: DataTypes.DECIMAL(10, 2),
@@ -64,7 +75,9 @@ const ProductVariation = sequelize.define('ProductVariation', {
   indexes: [
     { fields: ['product_id'] },
     { fields: ['sku'] },
-    { fields: ['price'] }
+    { fields: ['price'] },
+    { fields: ['platform'] },
+    { fields: ['condition'] }
   ]
 });
 

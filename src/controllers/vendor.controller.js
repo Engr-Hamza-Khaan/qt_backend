@@ -249,8 +249,8 @@ const settlePayout = async (req, res, next) => {
 // VENDOR PORTAL SPECIFIC ENDPOINTS
 // ==========================================
 
-// @desc    Get Vendor portal statistics
-// @route   GET /api/vendor-portal/dashboard
+// @desc    Get Vendor portal statistics with date range support
+// @route   GET /api/vendors/portal/dashboard
 // @access  Private (Vendor)
 const getVendorDashboard = async (req, res, next) => {
   try {
@@ -259,6 +259,72 @@ const getVendorDashboard = async (req, res, next) => {
     }
 
     const vendorId = req.user.vendorProfile.id;
+    const { startDate, endDate, dateFrom, dateTo, preset } = req.query;
+
+    let fromDate = dateFrom || startDate;
+    let toDate = dateTo || endDate;
+
+    if (preset === 'today') {
+      const now = new Date();
+      fromDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      toDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    } else if (preset === '7d') {
+      fromDate = new Date(new Date().setDate(new Date().getDate() - 7));
+      toDate = new Date();
+    } else if (preset === '30d') {
+      fromDate = new Date(new Date().setDate(new Date().getDate() - 30));
+      toDate = new Date();
+    } else if (preset === 'this_month') {
+      const now = new Date();
+      fromDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      toDate = new Date();
+    } else if (preset === 'this_year') {
+      const now = new Date();
+      fromDate = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+      toDate = new Date();
+    }
+
+    const dateWhere = {};
+    let parsedFrom = null;
+    let parsedTo = null;
+
+    if (fromDate) {
+      if (fromDate instanceof Date) {
+        parsedFrom = fromDate;
+      } else if (typeof fromDate === 'string' && fromDate.length === 10) {
+        parsedFrom = new Date(`${fromDate}T00:00:00.000Z`);
+      } else {
+        parsedFrom = new Date(fromDate);
+      }
+    }
+
+    if (toDate) {
+      if (toDate instanceof Date) {
+        parsedTo = toDate;
+      } else if (typeof toDate === 'string' && toDate.length === 10) {
+        parsedTo = new Date(`${toDate}T23:59:59.999Z`);
+      } else {
+        parsedTo = new Date(toDate);
+      }
+    }
+
+    // Safeguard: swap if parsedFrom > parsedTo
+    if (parsedFrom && parsedTo && !isNaN(parsedFrom.getTime()) && !isNaN(parsedTo.getTime())) {
+      if (parsedFrom > parsedTo) {
+        const temp = parsedFrom;
+        parsedFrom = parsedTo;
+        parsedTo = temp;
+      }
+    }
+
+    if (parsedFrom && !isNaN(parsedFrom.getTime())) {
+      dateWhere[Op.gte] = parsedFrom;
+    }
+    if (parsedTo && !isNaN(parsedTo.getTime())) {
+      dateWhere[Op.lte] = parsedTo;
+    }
+
+    const hasDateRange = Object.keys(dateWhere).length > 0 || Object.getOwnPropertySymbols(dateWhere).length > 0;
 
     const vendor = await VendorProfile.findByPk(vendorId, {
       include: [{ model: User, as: 'user', attributes: ['id', 'name', 'email'] }]
@@ -268,6 +334,7 @@ const getVendorDashboard = async (req, res, next) => {
       totalProducts,
       variations,
       earningsSum,
+      paidSum,
       totalSold,
       monthlyEarnings,
       recentOrders,
@@ -287,18 +354,33 @@ const getVendorDashboard = async (req, res, next) => {
       }),
 
       SupplierLedger.sum('amount', {
-        where: { vendorId, type: 'Sale Credit' }
+        where: {
+          vendorId,
+          type: 'Sale Credit',
+          ...(hasDateRange ? { createdAt: dateWhere } : {})
+        }
       }),
 
-      OrderItem.sum('quantity', { where: { vendorId } }),
+      SupplierLedger.sum('amount', {
+        where: {
+          vendorId,
+          type: 'Payout Debit',
+          ...(hasDateRange ? { createdAt: dateWhere } : {})
+        }
+      }),
+
+      OrderItem.sum('quantity', {
+        where: {
+          vendorId,
+          ...(hasDateRange ? { createdAt: dateWhere } : {})
+        }
+      }),
 
       SupplierLedger.findAll({
         where: {
           vendorId,
           type: 'Sale Credit',
-          createdAt: {
-            [Op.gte]: new Date(new Date().setDate(new Date().getDate() - 30))
-          }
+          ...(hasDateRange ? { createdAt: dateWhere } : {})
         },
         attributes: [
           [sequelize.fn('date_trunc', 'day', sequelize.col('created_at')), 'date'],
@@ -309,8 +391,9 @@ const getVendorDashboard = async (req, res, next) => {
       }),
 
       Order.findAll({
+        where: hasDateRange ? { createdAt: dateWhere } : {},
         order: [['createdAt', 'DESC']],
-        limit: 5,
+        limit: 10,
         include: [
           {
             model: OrderItem,
@@ -332,7 +415,10 @@ const getVendorDashboard = async (req, res, next) => {
       }),
 
       SupplierLedger.findAll({
-        where: { vendorId },
+        where: {
+          vendorId,
+          ...(hasDateRange ? { createdAt: dateWhere } : {})
+        },
         order: [['createdAt', 'DESC']],
         limit: 10
       }),
@@ -362,7 +448,8 @@ const getVendorDashboard = async (req, res, next) => {
           vendorId,
           orderId: {
             [Op.in]: sequelize.literal(`(SELECT id FROM orders WHERE payment_status = 'Paid')`)
-          }
+          },
+          ...(hasDateRange ? { createdAt: dateWhere } : {})
         },
         include: [{
           model: ProductVariation,
@@ -418,7 +505,7 @@ const getVendorDashboard = async (req, res, next) => {
           totalInventory,
           totalSold: totalSold || 0,
           totalEarnings: parseFloat(earningsSum || 0),
-          totalPaid: parseFloat(vendor.paidPayments || 0),
+          totalPaid: hasDateRange ? parseFloat(paidSum || 0) : parseFloat(vendor.paidPayments || 0),
           currentBalance: parseFloat(vendor.balance || 0)
         },
         monthlyTrends: monthlyEarnings,

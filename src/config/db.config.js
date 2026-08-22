@@ -3,7 +3,7 @@ require('dotenv').config();
 
 const sequelizeOptions = {
   dialect: 'postgres',
-  logging: process.env.NODE_ENV === 'development' ? console.log : false,
+  logging: false,
   pool: {
     max: 5,
     min: 0,

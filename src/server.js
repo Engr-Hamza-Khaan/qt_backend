@@ -18,12 +18,40 @@ const startServer = async () => {
     await sequelize.authenticate();
     console.log('Database connection has been established successfully.');
 
-    // Synchronize models (alter schema to match models)
-    await sequelize.sync({ alter: true }).catch((err) => {
-      console.warn('Sync alter notice (falling back to standard sync):', err.message);
-      return sequelize.sync();
-    });
-    console.log('Database tables synchronized successfully.');
+    // Synchronize models (alter schema to match models safely)
+    try {
+      await sequelize.sync({ alter: true });
+      console.log('Database tables synchronized successfully with alter.');
+    } catch (alterErr) {
+      console.warn('Sync alter notice (running safe column migration fallback):', alterErr.message);
+      
+      // Ensure missing tables are created first
+      await sequelize.sync();
+
+      // Safely check and add any missing columns across all models
+      const queryInterface = sequelize.getQueryInterface();
+      for (const modelName of Object.keys(sequelize.models)) {
+        const model = sequelize.models[modelName];
+        const tableName = model.getTableName();
+
+        try {
+          const tableDescription = await queryInterface.describeTable(tableName);
+          const modelAttributes = model.rawAttributes;
+
+          for (const [attrName, attrDef] of Object.entries(modelAttributes)) {
+            const columnName = attrDef.field || attrName;
+            if (!tableDescription[columnName]) {
+              console.log(`Adding missing column "${columnName}" to table "${tableName}"...`);
+              await queryInterface.addColumn(tableName, columnName, attrDef);
+              console.log(`Successfully added column "${columnName}" to "${tableName}".`);
+            }
+          }
+        } catch (tableErr) {
+          console.warn(`Could not sync columns for table ${tableName}:`, tableErr.message);
+        }
+      }
+      console.log('Safe database column migration completed successfully.');
+    }
 
     // Auto-seed database if empty
     const userCount = await User.count();

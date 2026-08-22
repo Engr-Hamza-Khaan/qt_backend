@@ -13,20 +13,28 @@ const sequelizeOptions = {
   define: {
     timestamps: true,
     underscored: true // converts camelCase to snake_case in tables
-  }
+  },
+  ...(process.env.DATABASE_URL && {
+    dialectOptions: {
+      ssl: {
+        require: true,
+        rejectUnauthorized: false
+      }
+    }
+  })
 };
 
 const sequelize = process.env.DATABASE_URL
   ? new Sequelize(process.env.DATABASE_URL, sequelizeOptions)
   : new Sequelize(
-      process.env.DB_NAME || 'qt_ecommerce',
-      process.env.DB_USER || 'postgres',
-      process.env.DB_PASSWORD || 'postgres',
-      {
-        ...sequelizeOptions,
-        host: process.env.DB_HOST || 'localhost',
-        port: process.env.DB_PORT || 5432
-      }
-    );
+    process.env.DB_NAME || 'qt_ecommerce',
+    process.env.DB_USER || 'postgres',
+    process.env.DB_PASSWORD || 'postgres',
+    {
+      ...sequelizeOptions,
+      host: process.env.DB_HOST || 'localhost',
+      port: process.env.DB_PORT || 5432
+    }
+  );
 
 module.exports = sequelize;

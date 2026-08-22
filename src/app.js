@@ -71,6 +71,17 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// Root endpoint for Render health check and root ping
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Quickturn Admin API Server is active',
+    version: '1.0.0',
+    status: 'online',
+    timestamp: new Date()
+  });
+});
+
 // Mount Routes
 app.use('/api', routes);
 

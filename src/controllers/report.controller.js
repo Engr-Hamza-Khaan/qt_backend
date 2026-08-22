@@ -10,6 +10,7 @@ const getDashboardSummary = async (req, res, next) => {
     const totalRevenue = await Order.sum('totalAmount', { where: { paymentStatus: 'Paid' } }) || 0;
     const totalOrdersCount = await Order.count();
     const pendingOrdersCount = await Order.count({ where: { orderStatus: 'Pending' } });
+    const returnedOrdersCount = await Order.count({ where: { orderStatus: 'Returned' } });
     const totalCustomersCount = await User.count({ where: { role: 'Customer' } });
     const totalVendorsCount = await VendorProfile.count({ where: { status: 'Active' } });
 
@@ -99,6 +100,7 @@ const getDashboardSummary = async (req, res, next) => {
           totalRevenue: parseFloat(totalRevenue),
           totalOrders: totalOrdersCount,
           pendingOrders: pendingOrdersCount,
+          returnedOrders: returnedOrdersCount,
           totalCustomers: totalCustomersCount,
           totalVendors: totalVendorsCount,
           totalProductsSold

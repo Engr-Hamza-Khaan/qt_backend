@@ -36,6 +36,10 @@ const User = sequelize.define('User', {
   phoneNumber: {
     type: DataTypes.STRING,
     allowNull: true
+  },
+  adminNotes: {
+    type: DataTypes.TEXT,
+    allowNull: true
   }
 }, {
   hooks: {

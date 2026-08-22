@@ -55,6 +55,8 @@ const findOrCreateGuestCustomer = async (guest, transaction) => {
     );
   } else if (user.role !== 'Customer') {
     throw new Error('This email is associated with a non-customer account');
+  } else if (!user.isActive) {
+    throw new Error('This email account has been blocked from placing orders. Please contact customer support.');
   }
 
   return user;
@@ -492,7 +494,7 @@ const guestCheckout = async (req, res, next) => {
     });
   } catch (error) {
     await transaction.rollback();
-    if (error.message?.includes('non-customer account')) {
+    if (error.message?.includes('non-customer account') || error.message?.includes('blocked')) {
       return res.status(400).json({ success: false, message: error.message });
     }
     next(error);

@@ -46,7 +46,7 @@ const Order = sequelize.define('Order', {
     allowNull: false
   },
   orderStatus: {
-    type: DataTypes.ENUM('Pending', 'Processing', 'Supplier Assigned', 'Shipped', 'Delivered', 'Cancelled', 'Refunded'),
+    type: DataTypes.ENUM('Pending', 'Processing', 'Supplier Assigned', 'Shipped', 'Delivered', 'Returned', 'Cancelled', 'Refunded'),
     defaultValue: 'Pending',
     allowNull: false
   },

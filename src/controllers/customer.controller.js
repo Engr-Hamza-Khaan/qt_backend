@@ -63,7 +63,7 @@ const getCustomerById = async (req, res, next) => {
       data: {
         customer,
         wishlist: mockWishlist,
-        supportNotes: 'First-time buyer, interested in custom 3D figure commissions.'
+        supportNotes: customer.adminNotes || ''
       }
     });
   } catch (error) {
@@ -127,9 +127,34 @@ const deleteCustomer = async (req, res, next) => {
   }
 };
 
+// @desc    Update customer admin staff notes
+// @route   PUT /api/customers/:id/notes
+// @access  Private (Admin/Staff)
+const updateCustomerNotes = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { adminNotes } = req.body;
+
+    const customer = await User.findOne({ where: { id, role: 'Customer' } });
+    if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+    customer.adminNotes = adminNotes;
+    await customer.save();
+
+    res.json({
+      success: true,
+      message: 'Staff notes updated successfully',
+      data: { adminNotes: customer.adminNotes }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getCustomers,
   getCustomerById,
   toggleCustomerStatus,
   deleteCustomer,
+  updateCustomerNotes,
 };

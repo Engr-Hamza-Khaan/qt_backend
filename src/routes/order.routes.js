@@ -5,6 +5,7 @@ const {
   assignSupplier,
   getOrders,
   getOrderById,
+  updateOrder,
   updateOrderStatus,
   deleteOrder
 } = require('../controllers/order.controller');
@@ -17,7 +18,7 @@ router.route('/')
 
 router.route('/:id')
   .get(protect, getOrderById)
-  .put(protect, authorize('Admin', 'Super Admin', 'Staff'), updateOrderStatus)
+  .put(protect, authorize('Admin', 'Super Admin', 'Staff'), updateOrder)
   .delete(protect, authorize('Admin', 'Super Admin', 'Staff'), deleteOrder);
 
 router.post('/:orderId/items/:itemId/assign-supplier', protect, authorize('Admin', 'Super Admin'), assignSupplier);

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getCustomers, getCustomerById, toggleCustomerStatus, deleteCustomer } = require('../controllers/customer.controller');
+const { getCustomers, getCustomerById, toggleCustomerStatus, deleteCustomer, updateCustomerNotes } = require('../controllers/customer.controller');
 const { protect } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
 
@@ -12,5 +12,6 @@ router.route('/:id')
   .delete(protect, authorize('Admin', 'Super Admin'), deleteCustomer);
 
 router.put('/:id/status', protect, authorize('Admin', 'Super Admin'), toggleCustomerStatus);
+router.put('/:id/notes', protect, authorize('Admin', 'Super Admin', 'Staff'), updateCustomerNotes);
 
 module.exports = router;

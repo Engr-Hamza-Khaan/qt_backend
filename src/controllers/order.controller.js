@@ -357,14 +357,25 @@ const getOrderById = async (req, res, next) => {
   }
 };
 
-// @desc    Update order statuses (shipping, payment, or order status)
+// @desc    Update order (statuses, addresses, items, notes)
 // @route   PUT /api/orders/:id
 // @access  Private (Admin/Staff)
-const updateOrderStatus = async (req, res, next) => {
+const updateOrder = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   try {
     const { id } = req.params;
-    const { orderStatus, paymentStatus, trackingNumber, carrier, orderNotes } = req.body;
+    const {
+      orderStatus,
+      paymentStatus,
+      trackingNumber,
+      carrier,
+      orderNotes,
+      customerNotes,
+      paymentMethod,
+      shippingAddress,
+      billingAddress,
+      items
+    } = req.body;
 
     const order = await Order.findByPk(id, {
       include: [{ model: OrderItem, as: 'items' }],
@@ -372,9 +383,75 @@ const updateOrderStatus = async (req, res, next) => {
     });
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
 
-    // Handle refund status reversals
-    if (orderStatus === 'Refunded' && order.orderStatus !== 'Refunded') {
-      // Loop through assigned items, deduct vendor balance and log ledger refund
+    // Handle items edit if provided
+    if (Array.isArray(items) && items.length > 0) {
+      const incomingItemIds = items.filter(i => i.id).map(i => i.id);
+      
+      // 1. Remove deleted items
+      for (const existingItem of order.items) {
+        if (!incomingItemIds.includes(existingItem.id)) {
+          // If supplier was assigned, restore stock if variation exists
+          if (existingItem.fulfillmentStatus === 'Assigned' && existingItem.variationId) {
+            const variation = await ProductVariation.findByPk(existingItem.variationId, { transaction });
+            if (variation) {
+              variation.stockQuantity = variation.stockQuantity + existingItem.quantity;
+              await variation.save({ transaction });
+            }
+          }
+          await existingItem.destroy({ transaction });
+        }
+      }
+
+      // 2. Add or update items & calculate subtotal
+      let newSubtotal = 0;
+      for (const item of items) {
+        const variation = await ProductVariation.findByPk(item.variationId, { transaction });
+        if (!variation) {
+          await transaction.rollback();
+          return res.status(404).json({ success: false, message: `Product variation ${item.variationId} not found` });
+        }
+
+        const itemPrice = item.price ? parseFloat(item.price) : parseFloat(variation.price);
+        const qty = parseInt(item.quantity, 10) || 1;
+        newSubtotal += itemPrice * qty;
+
+        if (item.id) {
+          // Update existing line item
+          const existingItem = order.items.find(i => i.id === item.id);
+          if (existingItem) {
+            // Adjust stock if assigned and quantity changed
+            if (existingItem.fulfillmentStatus === 'Assigned') {
+              const qtyDiff = qty - existingItem.quantity;
+              if (qtyDiff !== 0) {
+                variation.stockQuantity = Math.max(0, variation.stockQuantity - qtyDiff);
+                await variation.save({ transaction });
+              }
+            }
+            existingItem.quantity = qty;
+            existingItem.price = itemPrice;
+            await existingItem.save({ transaction });
+          }
+        } else {
+          // Add new line item
+          await OrderItem.create({
+            orderId: order.id,
+            variationId: variation.id,
+            quantity: qty,
+            price: itemPrice,
+            costPrice: null,
+            vendorId: null,
+            fulfillmentStatus: 'Unassigned'
+          }, { transaction });
+        }
+      }
+
+      // Recalculate order total amount with discount
+      const discount = parseFloat(order.discountAmount) || 0;
+      order.totalAmount = Math.max(0, newSubtotal - discount);
+    }
+
+    // Handle refund or return status reversals
+    if ((orderStatus === 'Refunded' || orderStatus === 'Returned') && order.orderStatus !== 'Refunded' && order.orderStatus !== 'Returned') {
       for (const item of order.items) {
         if (item.vendorId && item.costPrice) {
           const vendor = await VendorProfile.findByPk(item.vendorId, { transaction });
@@ -390,24 +467,79 @@ const updateOrderStatus = async (req, res, next) => {
               amount: refundCost,
               balanceAfter: newBalance,
               referenceId: order.id,
-              notes: `Refund debit for Order ${order.orderNumber}`
+              notes: `Debit for ${orderStatus} Order ${order.orderNumber}`
+            }, { transaction });
+          }
+        }
+
+        // Restore stock for returned/refunded variation
+        if (item.variationId) {
+          const variation = await ProductVariation.findByPk(item.variationId, { transaction });
+          if (variation) {
+            const prevStock = variation.stockQuantity;
+            const newStock = prevStock + item.quantity;
+            variation.stockQuantity = newStock;
+            await variation.save({ transaction });
+
+            await InventoryMovement.create({
+              variationId: variation.id,
+              quantityChanged: item.quantity,
+              previousStock: prevStock,
+              newStock,
+              type: 'Return',
+              notes: `Stock restored after order marked as ${orderStatus} (${order.orderNumber})`,
+              userId: req.user.id,
+              vendorId: item.vendorId || null
             }, { transaction });
           }
         }
       }
-      order.paymentStatus = 'Refunded';
+      if (orderStatus === 'Refunded') {
+        order.paymentStatus = 'Refunded';
+      }
     }
 
-    if (orderStatus) order.orderStatus = orderStatus;
-    if (paymentStatus) order.paymentStatus = paymentStatus;
-    if (trackingNumber) order.trackingNumber = trackingNumber;
-    if (carrier) order.carrier = carrier;
-    if (orderNotes) order.orderNotes = orderNotes;
+    if (orderStatus !== undefined) order.orderStatus = orderStatus;
+    if (paymentStatus !== undefined) order.paymentStatus = paymentStatus;
+    if (trackingNumber !== undefined) order.trackingNumber = trackingNumber;
+    if (carrier !== undefined) order.carrier = carrier;
+    if (orderNotes !== undefined) order.orderNotes = orderNotes;
+    if (customerNotes !== undefined) order.customerNotes = customerNotes;
+    if (paymentMethod !== undefined) order.paymentMethod = paymentMethod;
+    if (shippingAddress !== undefined) order.shippingAddress = shippingAddress;
+    if (billingAddress !== undefined) order.billingAddress = billingAddress;
 
     await order.save({ transaction });
     await transaction.commit();
 
-    res.json({ success: true, message: 'Order status updated successfully', data: order });
+    // Fetch updated order with associations
+    const updatedOrder = await Order.findByPk(id, {
+      include: [
+        {
+          model: OrderItem,
+          as: 'items',
+          include: [
+            {
+              model: ProductVariation,
+              as: 'variation',
+              include: [{ model: Product, as: 'product' }]
+            },
+            {
+              model: VendorProfile,
+              as: 'assignedVendor',
+              attributes: ['id', 'companyName', 'email']
+            }
+          ]
+        },
+        {
+          model: User,
+          as: 'customer',
+          attributes: ['id', 'name', 'email', 'phoneNumber']
+        }
+      ]
+    });
+
+    res.json({ success: true, message: 'Order updated successfully', data: updatedOrder });
   } catch (error) {
     await transaction.rollback();
     next(error);
@@ -479,6 +611,7 @@ module.exports = {
   assignSupplier,
   getOrders,
   getOrderById,
-  updateOrderStatus,
+  updateOrder,
+  updateOrderStatus: updateOrder,
   deleteOrder
 };

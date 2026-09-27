@@ -67,6 +67,66 @@ const ProductVariation = sequelize.define('ProductVariation', {
     defaultValue: 5,
     allowNull: false
   },
+  title: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Variation-specific title'
+  },
+  imageUrl: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+    comment: 'Variation-specific image URL'
+  },
+  description: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  embedMedia: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  region: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  developer: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  brand: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  modelNumber: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  storyHours: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  placement: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  maxPriceCap: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true
+  },
+  genres: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: []
+  },
+  searchKeywords: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  attributes: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: {}
+  },
   isActive: {
     type: DataTypes.BOOLEAN,
     defaultValue: true

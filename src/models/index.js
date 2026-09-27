@@ -16,6 +16,7 @@ const RepairRequest = require('./repair.model');
 const SellRequest = require('./sell.model');
 const ChatConversation = require('./chat.model');
 const SearchTerm = require('./searchTerm.model');
+const Invoice = require('./invoice.model');
 
 // Define Relationships
 
@@ -75,6 +76,14 @@ SupplierLedger.belongsTo(VendorProfile, { foreignKey: 'vendorId', as: 'vendor' }
 User.hasMany(ChatConversation, { foreignKey: 'assignedTo', as: 'assignedConversations', onDelete: 'SET NULL' });
 ChatConversation.belongsTo(User, { foreignKey: 'assignedTo', as: 'agent' });
 
+// User <-> Invoice (One-to-Many, optional)
+User.hasMany(Invoice, { foreignKey: 'customerId', as: 'invoices', onDelete: 'SET NULL' });
+Invoice.belongsTo(User, { foreignKey: 'customerId', as: 'customer' });
+
+// Order <-> Invoice (One-to-Many, optional)
+Order.hasMany(Invoice, { foreignKey: 'orderId', as: 'invoices', onDelete: 'SET NULL' });
+Invoice.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
+
 module.exports = {
   sequelize,
   User,
@@ -93,5 +102,6 @@ module.exports = {
   RepairRequest,
   SellRequest,
   ChatConversation,
-  SearchTerm
+  SearchTerm,
+  Invoice
 };

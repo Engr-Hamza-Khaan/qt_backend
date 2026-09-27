@@ -90,6 +90,16 @@ const Product = sequelize.define('Product', {
     type: DataTypes.UUID,
     allowNull: true,
     comment: 'Reference to VendorProfile. Null means Admin'
+  },
+  maxPriceCap: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    comment: 'Maximum price cap set by admin to restrict vendor pricing'
+  },
+  embedMedia: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+    comment: 'YouTube embed URL or video link'
   }
 }, {
   indexes: [

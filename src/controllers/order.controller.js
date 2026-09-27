@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
 const { sequelize, Order, OrderItem, ProductVariation, Product, VendorProfile, SupplierLedger, InventoryMovement, User } = require('../models');
 const { validateAndApplyCoupon } = require('../utils/discount.service');
+const { sendOrderEmails } = require('../utils/email.service');
 
 // Helper to generate Shopify-style order number: "QT-10001" etc.
 const generateOrderNumber = async () => {
@@ -107,7 +108,27 @@ const createOrder = async (req, res, next) => {
     await transaction.commit();
 
     const fullOrder = await Order.findByPk(order.id, {
-      include: [{ model: OrderItem, as: 'items', include: [{ model: ProductVariation, as: 'variation', include: [{ model: Product, as: 'product' }] }] }]
+      include: [
+        {
+          model: OrderItem,
+          as: 'items',
+          include: [{ model: ProductVariation, as: 'variation', include: [{ model: Product, as: 'product' }] }],
+        },
+        {
+          model: User,
+          as: 'customer',
+          attributes: ['id', 'name', 'email', 'phoneNumber'],
+        },
+      ],
+    });
+
+    // Dispatch order notifications to Customer & Admin asynchronously
+    sendOrderEmails({
+      order: fullOrder,
+      customer: fullOrder?.customer || req.user,
+      items: fullOrder?.items,
+    }).catch((emailErr) => {
+      console.error('[Order Controller] Error sending order notification emails:', emailErr);
     });
 
     res.status(201).json({ success: true, data: fullOrder });

@@ -90,6 +90,8 @@ const addProduct = async (req, res, next) => {
       attributes,
       dimensions,
       weight,
+      maxPriceCap,
+      embedMedia,
       isFeatured,
       isBestSeller,
       isFlashSale,
@@ -109,6 +111,24 @@ const addProduct = async (req, res, next) => {
       vendorId = req.body.vendorId;
     }
 
+    const effectiveMaxCap = maxPriceCap !== undefined && maxPriceCap !== '' && maxPriceCap !== null
+      ? parseFloat(maxPriceCap)
+      : (attributes?.maxPriceCap ? parseFloat(attributes.maxPriceCap) : null);
+
+    const effectiveEmbedMedia = embedMedia || attributes?.embedMedia || null;
+
+    if (req.user.role === 'Vendor' && effectiveMaxCap && variations && Array.isArray(variations)) {
+      for (const val of variations) {
+        if (val.price !== undefined && Number(val.price) > Number(effectiveMaxCap)) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Variation price (${val.price}) exceeds the maximum price cap (${effectiveMaxCap}) for this product.`
+          });
+        }
+      }
+    }
+
     const product = await Product.create({
       title,
       description,
@@ -122,6 +142,8 @@ const addProduct = async (req, res, next) => {
       attributes,
       dimensions,
       weight,
+      maxPriceCap: effectiveMaxCap,
+      embedMedia: effectiveEmbedMedia,
       isFeatured: isFeatured || false,
       isBestSeller: isBestSeller || false,
       isFlashSale: isFlashSale || false,
@@ -216,6 +238,9 @@ const editProduct = async (req, res, next) => {
         ? updateData.keywords.split(',').map((t) => t.trim()).filter(Boolean)
         : [];
     }
+    if (updateData.maxPriceCap !== undefined) {
+      updateData.maxPriceCap = updateData.maxPriceCap !== '' && updateData.maxPriceCap !== null ? parseFloat(updateData.maxPriceCap) : null;
+    }
 
     await product.update(updateData);
     res.json({ success: true, data: product });
@@ -274,6 +299,8 @@ const duplicateProduct = async (req, res, next) => {
       attributes: original.attributes,
       dimensions: original.dimensions,
       weight: original.weight,
+      maxPriceCap: original.maxPriceCap,
+      embedMedia: original.embedMedia || original.attributes?.embedMedia || null,
       isFeatured: original.isFeatured,
       isBestSeller: original.isBestSeller,
       isFlashSale: original.isFlashSale,
@@ -481,8 +508,34 @@ const getProductById = async (req, res, next) => {
 const addVariation = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   try {
-    const { productId } = req.params;
-    const { color, storage, edition, platform, condition, bundle, price, costPrice, stockQuantity, sku, lowStockThreshold, isActive } = req.body;
+    const {
+      title,
+      imageUrl,
+      description,
+      embedMedia,
+      region,
+      developer,
+      brand,
+      modelNumber,
+      storyHours,
+      placement,
+      maxPriceCap,
+      genres,
+      searchKeywords,
+      attributes,
+      color,
+      storage,
+      edition,
+      platform,
+      condition,
+      bundle,
+      price,
+      costPrice,
+      stockQuantity,
+      sku,
+      lowStockThreshold,
+      isActive
+    } = req.body;
 
     const product = await Product.findByPk(productId);
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
@@ -492,12 +545,34 @@ const addVariation = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Not authorized to edit variations for this product' });
     }
 
+    const effectiveMaxCap = maxPriceCap || product.maxPriceCap || product.attributes?.maxPriceCap;
+    if (req.user.role === 'Vendor' && effectiveMaxCap && price !== undefined && Number(price) > Number(effectiveMaxCap)) {
+      return res.status(400).json({
+        success: false,
+        message: `Variation price (${price}) exceeds the maximum price cap (${effectiveMaxCap}) for this product.`
+      });
+    }
+
     const varCondition = condition || product.condition || 'New';
-    const finalSku = sku || generateSKU(platform || product.attributes?.platform || 'GEN', varCondition, product.title, storage || color || edition || bundle);
+    const finalSku = sku || generateSKU(platform || product.attributes?.platform || 'GEN', varCondition, title || product.title, edition || bundle || storage || color);
 
     const variation = await ProductVariation.create({
       productId,
       sku: finalSku,
+      title: title || null,
+      imageUrl: imageUrl || null,
+      description: description || null,
+      embedMedia: embedMedia || null,
+      region: region || null,
+      developer: developer || null,
+      brand: brand || null,
+      modelNumber: modelNumber || null,
+      storyHours: storyHours || null,
+      placement: placement || null,
+      maxPriceCap: effectiveMaxCap ? parseFloat(effectiveMaxCap) : null,
+      genres: Array.isArray(genres) ? genres : (genres ? [genres] : []),
+      searchKeywords: searchKeywords || null,
+      attributes: attributes || {},
       color: color || null,
       storage: storage || null,
       edition: edition || null,
@@ -536,7 +611,34 @@ const updateVariation = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   try {
     const { variationId } = req.params;
-    const { price, costPrice, stockQuantity, color, storage, edition, platform, condition, bundle, sku, lowStockThreshold, isActive } = req.body;
+    const {
+      title,
+      imageUrl,
+      description,
+      embedMedia,
+      region,
+      developer,
+      brand,
+      modelNumber,
+      storyHours,
+      placement,
+      maxPriceCap,
+      genres,
+      searchKeywords,
+      attributes,
+      price,
+      costPrice,
+      stockQuantity,
+      color,
+      storage,
+      edition,
+      platform,
+      condition,
+      bundle,
+      sku,
+      lowStockThreshold,
+      isActive
+    } = req.body;
 
     const variation = await ProductVariation.findByPk(variationId, {
       include: [{ model: Product, as: 'product' }]
@@ -549,9 +651,45 @@ const updateVariation = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
+    const effectiveMaxCap = maxPriceCap || variation.maxPriceCap || variation.product?.maxPriceCap || variation.product?.attributes?.maxPriceCap;
+    if (req.user.role === 'Vendor' && effectiveMaxCap && price !== undefined && Number(price) > Number(effectiveMaxCap)) {
+      return res.status(400).json({
+        success: false,
+        message: `Variation price (${price}) exceeds the maximum price cap (${effectiveMaxCap}) for this product.`
+      });
+    }
+
     const prevStock = variation.stockQuantity;
 
-    const updateFields = { price, costPrice, color, storage, edition, platform, condition, bundle, sku, lowStockThreshold, isActive };
+    const updateFields = {
+      price,
+      costPrice,
+      color,
+      storage,
+      edition,
+      platform,
+      condition,
+      bundle,
+      sku,
+      lowStockThreshold,
+      isActive
+    };
+
+    if (title !== undefined) updateFields.title = title || null;
+    if (imageUrl !== undefined) updateFields.imageUrl = imageUrl || null;
+    if (description !== undefined) updateFields.description = description || null;
+    if (embedMedia !== undefined) updateFields.embedMedia = embedMedia || null;
+    if (region !== undefined) updateFields.region = region || null;
+    if (developer !== undefined) updateFields.developer = developer || null;
+    if (brand !== undefined) updateFields.brand = brand || null;
+    if (modelNumber !== undefined) updateFields.modelNumber = modelNumber || null;
+    if (storyHours !== undefined) updateFields.storyHours = storyHours || null;
+    if (placement !== undefined) updateFields.placement = placement || null;
+    if (maxPriceCap !== undefined) updateFields.maxPriceCap = maxPriceCap ? parseFloat(maxPriceCap) : null;
+    if (genres !== undefined) updateFields.genres = Array.isArray(genres) ? genres : (genres ? [genres] : []);
+    if (searchKeywords !== undefined) updateFields.searchKeywords = searchKeywords || null;
+    if (attributes !== undefined) updateFields.attributes = attributes || {};
+
     if (stockQuantity !== undefined) {
       updateFields.stockQuantity = stockQuantity;
     }

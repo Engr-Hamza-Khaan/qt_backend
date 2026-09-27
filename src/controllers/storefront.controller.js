@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { Op } = require('sequelize');
 const { validateAndApplyCoupon } = require('../utils/discount.service');
+const { sendOrderEmails } = require('../utils/email.service');
 const {
   sequelize,
   Product,
@@ -13,6 +14,7 @@ const {
   WebsiteSetting,
   Page,
 } = require('../models');
+const { DEFAULT_LANDING_PAGE } = require('./setting.controller');
 
 const sanitizeVariation = (v) => {
   const plain = v.toJSON ? v.toJSON() : v;
@@ -65,7 +67,7 @@ const findOrCreateGuestCustomer = async (guest, transaction) => {
 // GET /api/store/home
 const getHomeData = async (req, res, next) => {
   try {
-    const [featured, bestSellers, flashSale, newArrivals, categories, bannersSetting, notificationSetting] =
+    const [featured, bestSellers, flashSale, newArrivals, categories, bannersSetting, notificationSetting, landingPageSetting] =
       await Promise.all([
         Product.findAll({
           where: { status: 'Published', isFeatured: true },
@@ -113,6 +115,7 @@ const getHomeData = async (req, res, next) => {
         }),
         WebsiteSetting.findOne({ where: { key: 'homepage_banners' } }),
         WebsiteSetting.findOne({ where: { key: 'notification_bar' } }),
+        WebsiteSetting.findOne({ where: { key: 'landing_page' } }),
       ]);
 
     res.json({
@@ -138,6 +141,26 @@ const getHomeData = async (req, res, next) => {
             icon: 'truck',
             placement: 'top',
             ...(notificationSetting?.value || {}),
+          },
+          landingPage: {
+            ...DEFAULT_LANDING_PAGE,
+            ...(landingPageSetting?.value || {}),
+            hero: {
+              ...DEFAULT_LANDING_PAGE.hero,
+              ...(landingPageSetting?.value?.hero || {}),
+            },
+            productHeadings: {
+              ...DEFAULT_LANDING_PAGE.productHeadings,
+              ...(landingPageSetting?.value?.productHeadings || {}),
+            },
+            promoBanner: {
+              ...DEFAULT_LANDING_PAGE.promoBanner,
+              ...(landingPageSetting?.value?.promoBanner || {}),
+            },
+            sellCta: {
+              ...DEFAULT_LANDING_PAGE.sellCta,
+              ...(landingPageSetting?.value?.sellCta || {}),
+            },
           },
         },
       },
@@ -480,6 +503,19 @@ const guestCheckout = async (req, res, next) => {
           ],
         },
       ],
+    });
+
+    // Dispatch order notifications to Customer & Admin asynchronously
+    sendOrderEmails({
+      order: fullOrder,
+      customer: {
+        name: guest.name || customer.name,
+        email: guest.email || customer.email,
+        phoneNumber: guest.phoneNumber || customer.phoneNumber,
+      },
+      items: fullOrder.items,
+    }).catch((emailErr) => {
+      console.error('[Storefront Checkout] Error sending order notification emails:', emailErr);
     });
 
     res.status(201).json({

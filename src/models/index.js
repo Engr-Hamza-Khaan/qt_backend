@@ -17,6 +17,7 @@ const SellRequest = require('./sell.model');
 const ChatConversation = require('./chat.model');
 const SearchTerm = require('./searchTerm.model');
 const Invoice = require('./invoice.model');
+const VendorStock = require('./vendorStock.model');
 
 // Define Relationships
 
@@ -84,6 +85,14 @@ Invoice.belongsTo(User, { foreignKey: 'customerId', as: 'customer' });
 Order.hasMany(Invoice, { foreignKey: 'orderId', as: 'invoices', onDelete: 'SET NULL' });
 Invoice.belongsTo(Order, { foreignKey: 'orderId', as: 'order' });
 
+// VendorProfile <-> VendorStock (One-to-Many)
+VendorProfile.hasMany(VendorStock, { foreignKey: 'vendorId', as: 'stocks', onDelete: 'CASCADE' });
+VendorStock.belongsTo(VendorProfile, { foreignKey: 'vendorId', as: 'vendor' });
+
+// ProductVariation <-> VendorStock (One-to-Many)
+ProductVariation.hasMany(VendorStock, { foreignKey: 'variationId', as: 'vendorStocks', onDelete: 'CASCADE' });
+VendorStock.belongsTo(ProductVariation, { foreignKey: 'variationId', as: 'variation' });
+
 module.exports = {
   sequelize,
   User,
@@ -103,5 +112,7 @@ module.exports = {
   SellRequest,
   ChatConversation,
   SearchTerm,
-  Invoice
+  Invoice,
+  VendorStock
 };
+

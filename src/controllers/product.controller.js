@@ -2,7 +2,7 @@ const { Op } = require('sequelize');
 const fs = require('fs');
 const path = require('path');
 const { uploadDir } = require('../middlewares/upload.middleware');
-const { sequelize, Product, ProductVariation, Category, Media, InventoryMovement, VendorProfile } = require('../models');
+const { sequelize, Product, ProductVariation, Category, Media, InventoryMovement, VendorProfile, VendorStock } = require('../models');
 
 // Helper to generate SKU: "QT-PLAT-COND-ID-RAND"
 const generateSKU = (platform, condition, title, extra = '') => {
@@ -77,6 +77,13 @@ const getCategories = async (req, res, next) => {
 // ==========================================
 
 const addProduct = async (req, res, next) => {
+  if (req.user.role === 'Vendor') {
+    return res.status(403).json({
+      success: false,
+      message: 'Vendors are not permitted to add products or SKUs. Please stock in existing catalog products.'
+    });
+  }
+
   const transaction = await sequelize.transaction();
   try {
     const {
@@ -99,17 +106,7 @@ const addProduct = async (req, res, next) => {
       variations // Array of variations
     } = req.body;
 
-    // Check if role is Vendor, force product vendorId
-    let vendorId = null;
-    if (req.user.role === 'Vendor') {
-      if (!req.user.vendorProfile) {
-        return res.status(400).json({ success: false, message: 'Vendor profile not approved or missing' });
-      }
-      vendorId = req.user.vendorProfile.id;
-    } else if (req.body.vendorId) {
-      // Admins can create products and assign them to specific vendors
-      vendorId = req.body.vendorId;
-    }
+    let vendorId = req.body.vendorId || null;
 
     const effectiveMaxCap = maxPriceCap !== undefined && maxPriceCap !== '' && maxPriceCap !== null
       ? parseFloat(maxPriceCap)
@@ -207,14 +204,13 @@ const addProduct = async (req, res, next) => {
 
 const editProduct = async (req, res, next) => {
   try {
+    if (req.user.role === 'Vendor') {
+      return res.status(403).json({ success: false, message: 'Vendors are not permitted to edit catalog products.' });
+    }
+
     const { id } = req.params;
     const product = await Product.findByPk(id);
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
-
-    // Vendor restrictions
-    if (req.user.role === 'Vendor' && product.vendorId !== req.user.vendorProfile.id) {
-      return res.status(403).json({ success: false, message: 'Not authorized to edit this product' });
-    }
 
     const updateData = { ...req.body };
     if (updateData.tags !== undefined) {
@@ -251,14 +247,13 @@ const editProduct = async (req, res, next) => {
 
 const deleteProduct = async (req, res, next) => {
   try {
+    if (req.user.role === 'Vendor') {
+      return res.status(403).json({ success: false, message: 'Vendors are not permitted to delete catalog products.' });
+    }
+
     const { id } = req.params;
     const product = await Product.findByPk(id);
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
-
-    // Vendor restrictions
-    if (req.user.role === 'Vendor' && product.vendorId !== req.user.vendorProfile.id) {
-      return res.status(403).json({ success: false, message: 'Not authorized to delete this product' });
-    }
 
     await product.destroy();
     res.json({ success: true, message: 'Product deleted successfully' });
@@ -270,6 +265,11 @@ const deleteProduct = async (req, res, next) => {
 const duplicateProduct = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   try {
+    if (req.user.role === 'Vendor') {
+      await transaction.rollback();
+      return res.status(403).json({ success: false, message: 'Vendors are not permitted to duplicate catalog products.' });
+    }
+
     const { id } = req.params;
     const original = await Product.findByPk(id, {
       include: [
@@ -279,11 +279,6 @@ const duplicateProduct = async (req, res, next) => {
     });
 
     if (!original) return res.status(404).json({ success: false, message: 'Original product not found' });
-
-    // Vendor restrictions
-    if (req.user.role === 'Vendor' && original.vendorId !== req.user.vendorProfile.id) {
-      return res.status(403).json({ success: false, message: 'Not authorized to duplicate this product' });
-    }
 
     // Clone product
     const clonedProduct = await Product.create({
@@ -408,10 +403,8 @@ const getProducts = async (req, res, next) => {
       where['attributes.platform'] = platform;
     }
 
-    // Vendor restrictions
-    if (req.user.role === 'Vendor') {
-      where.vendorId = req.user.vendorProfile.id;
-    } else if (vendorId) {
+    // Vendor restrictions: Vendors can see ALL products added by Admin, do not restrict where.vendorId
+    if (vendorId) {
       where.vendorId = vendorId;
     }
 
@@ -421,12 +414,23 @@ const getProducts = async (req, res, next) => {
       sortOrder = [[sortBy, order === 'asc' ? 'ASC' : 'DESC']];
     }
 
+    const isVendor = req.user?.role === 'Vendor';
+    const currentVendorId = req.user?.vendorProfile?.id;
+
     // Variations include options
     const variationInclude = {
       model: ProductVariation,
       as: 'variations',
       required: false,
       separate: lowStock !== 'true',
+      include: isVendor && currentVendorId ? [
+        {
+          model: VendorStock,
+          as: 'vendorStocks',
+          where: { vendorId: currentVendorId },
+          required: false
+        }
+      ] : []
     };
 
     if (lowStock === 'true') {
@@ -479,9 +483,23 @@ const getProducts = async (req, res, next) => {
 const getProductById = async (req, res, next) => {
   try {
     const { id } = req.params;
+    const isVendor = req.user?.role === 'Vendor';
+    const currentVendorId = req.user?.vendorProfile?.id;
+
     const product = await Product.findByPk(id, {
       include: [
-        { model: ProductVariation, as: 'variations' },
+        {
+          model: ProductVariation,
+          as: 'variations',
+          include: isVendor && currentVendorId ? [
+            {
+              model: VendorStock,
+              as: 'vendorStocks',
+              where: { vendorId: currentVendorId },
+              required: false
+            }
+          ] : []
+        },
         { model: Media, as: 'media', order: [['orderIndex', 'ASC'], ['createdAt', 'ASC']] },
         { model: Category, as: 'category' },
         { model: VendorProfile, as: 'vendor' }
@@ -489,11 +507,6 @@ const getProductById = async (req, res, next) => {
     });
 
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
-
-    // Vendor restriction
-    if (req.user.role === 'Vendor' && product.vendorId !== req.user.vendorProfile.id) {
-      return res.status(403).json({ success: false, message: 'Not authorized to access this product' });
-    }
 
     res.json({ success: true, data: product });
   } catch (error) {
@@ -506,6 +519,13 @@ const getProductById = async (req, res, next) => {
 // ==========================================
 
 const addVariation = async (req, res, next) => {
+  if (req.user.role === 'Vendor') {
+    return res.status(403).json({
+      success: false,
+      message: 'Vendors are not permitted to add SKUs. Vendor can only stock in and stock out.'
+    });
+  }
+
   const transaction = await sequelize.transaction();
   try {
     const {
@@ -608,6 +628,13 @@ const addVariation = async (req, res, next) => {
 };
 
 const updateVariation = async (req, res, next) => {
+  if (req.user.role === 'Vendor') {
+    return res.status(403).json({
+      success: false,
+      message: 'Vendors are not permitted to modify catalog SKUs. Vendor can only stock in and stock out.'
+    });
+  }
+
   const transaction = await sequelize.transaction();
   try {
     const { variationId } = req.params;
@@ -720,6 +747,13 @@ const updateVariation = async (req, res, next) => {
 
 const deleteVariation = async (req, res, next) => {
   try {
+    if (req.user.role === 'Vendor') {
+      return res.status(403).json({
+        success: false,
+        message: 'Vendors are not permitted to delete SKUs.'
+      });
+    }
+
     const { variationId } = req.params;
     const variation = await ProductVariation.findByPk(variationId, {
       include: [{ model: Product, as: 'product' }]

@@ -37,23 +37,23 @@ router.route('/categories/:id')
 // PRODUCT ROUTES
 // ==========================================
 router.route('/')
-  .post(protect, authorize('Admin', 'Super Admin', 'Vendor'), addProduct)
+  .post(protect, authorize('Admin', 'Super Admin'), addProduct)
   .get(protect, authorize('Admin', 'Super Admin', 'Staff', 'Vendor'), getProducts);
 
-router.delete('/media/:mediaId', protect, authorize('Admin', 'Super Admin', 'Vendor'), deleteMedia);
+router.delete('/media/:mediaId', protect, authorize('Admin', 'Super Admin'), deleteMedia);
 
 router.route('/variations/:variationId')
-  .put(protect, authorize('Admin', 'Super Admin', 'Vendor'), updateVariation)
-  .delete(protect, authorize('Admin', 'Super Admin', 'Vendor'), deleteVariation);
+  .put(protect, authorize('Admin', 'Super Admin'), updateVariation)
+  .delete(protect, authorize('Admin', 'Super Admin'), deleteVariation);
 
-router.post('/:productId/variations', protect, authorize('Admin', 'Super Admin', 'Vendor'), addVariation);
-router.post('/:productId/media', protect, authorize('Admin', 'Super Admin', 'Vendor'), handleUpload('file'), uploadProductMedia);
-router.put('/:productId/media/reorder', protect, authorize('Admin', 'Super Admin', 'Vendor'), reorderMedia);
-router.post('/:id/duplicate', protect, authorize('Admin', 'Super Admin', 'Vendor'), duplicateProduct);
+router.post('/:productId/variations', protect, authorize('Admin', 'Super Admin'), addVariation);
+router.post('/:productId/media', protect, authorize('Admin', 'Super Admin'), handleUpload('file'), uploadProductMedia);
+router.put('/:productId/media/reorder', protect, authorize('Admin', 'Super Admin'), reorderMedia);
+router.post('/:id/duplicate', protect, authorize('Admin', 'Super Admin'), duplicateProduct);
 
 router.route('/:id')
   .get(protect, authorize('Admin', 'Super Admin', 'Staff', 'Vendor'), getProductById)
-  .put(protect, authorize('Admin', 'Super Admin', 'Vendor'), editProduct)
-  .delete(protect, authorize('Admin', 'Super Admin', 'Vendor'), deleteProduct);
+  .put(protect, authorize('Admin', 'Super Admin'), editProduct)
+  .delete(protect, authorize('Admin', 'Super Admin'), deleteProduct);
 
 module.exports = router;

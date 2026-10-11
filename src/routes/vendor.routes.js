@@ -7,10 +7,18 @@ const {
   updateVendor,
   deleteVendor,
   settlePayout,
-  getVendorDashboard
+  getVendorDashboard,
+  vendorStockIn,
+  vendorStockOut,
+  getMyVendorStock
 } = require('../controllers/vendor.controller');
 const { protect } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
+
+// Vendor Stock management routes (Vendor only)
+router.post('/stock/in', protect, authorize('Vendor'), vendorStockIn);
+router.post('/stock/out', protect, authorize('Vendor'), vendorStockOut);
+router.get('/stock/my-stock', protect, authorize('Vendor'), getMyVendorStock);
 
 // Vendor Portal specific analytics route (must be before :id routes)
 router.get('/portal/dashboard', protect, authorize('Vendor'), getVendorDashboard);

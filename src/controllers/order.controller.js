@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { sequelize, Order, OrderItem, ProductVariation, Product, VendorProfile, SupplierLedger, InventoryMovement, User } = require('../models');
+const { sequelize, Order, OrderItem, ProductVariation, Product, VendorProfile, SupplierLedger, InventoryMovement, User, VendorStock } = require('../models');
 const { validateAndApplyCoupon } = require('../utils/discount.service');
 const { sendOrderEmails } = require('../utils/email.service');
 
@@ -166,8 +166,21 @@ const assignSupplier = async (req, res, next) => {
     }
 
     // Find the variation to check stock and cost price
-    const variation = await ProductVariation.findByPk(orderItem.variationId);
+    const variation = await ProductVariation.findByPk(orderItem.variationId, { transaction });
     if (!variation) return res.status(404).json({ success: false, message: 'Product variation not found' });
+
+    // Check VendorStock for this supplier if recorded
+    const vendorStock = await VendorStock.findOne({
+      where: { vendorId: vendor.id, variationId: variation.id },
+      transaction
+    });
+
+    if (vendorStock && vendorStock.quantity < orderItem.quantity) {
+      return res.status(400).json({
+        success: false,
+        message: `Supplier ${vendor.companyName} only has ${vendorStock.quantity} unit(s) of SKU ${variation.sku}. Requested: ${orderItem.quantity}`
+      });
+    }
 
     if (variation.stockQuantity < orderItem.quantity) {
       return res.status(400).json({
@@ -176,11 +189,16 @@ const assignSupplier = async (req, res, next) => {
       });
     }
 
-    // 1. Reduce vendor's inventory
+    // 1. Reduce inventory
     const prevStock = variation.stockQuantity;
     const newStock = prevStock - orderItem.quantity;
     variation.stockQuantity = newStock;
     await variation.save({ transaction });
+
+    if (vendorStock) {
+      vendorStock.quantity = Math.max(0, vendorStock.quantity - orderItem.quantity);
+      await vendorStock.save({ transaction });
+    }
 
     // 2. Log inventory movement
     await InventoryMovement.create({
@@ -194,16 +212,19 @@ const assignSupplier = async (req, res, next) => {
       vendorId: vendor.id
     }, { transaction });
 
-    // 3. Update order item with vendor details & cost price
-    // We lock in the vendor's costPrice at assignment time
+    // 3. Update order item with vendor details & cost price (vendor earnings)
+    const effectiveCostPrice = vendorStock?.vendorEarnings
+      ? parseFloat(vendorStock.vendorEarnings)
+      : parseFloat(variation.costPrice || 0);
+
     orderItem.vendorId = vendor.id;
-    orderItem.costPrice = variation.costPrice;
+    orderItem.costPrice = effectiveCostPrice;
     orderItem.fulfillmentStatus = 'Assigned';
     await orderItem.save({ transaction });
 
     // 4. Update vendor profile ledger balances
     // earnings = quantity * cost price
-    const earnings = orderItem.quantity * parseFloat(variation.costPrice);
+    const earnings = orderItem.quantity * effectiveCostPrice;
     const newBalance = parseFloat(vendor.balance) + earnings;
     vendor.balance = newBalance;
     await vendor.save({ transaction });
@@ -502,6 +523,17 @@ const updateOrder = async (req, res, next) => {
             variation.stockQuantity = newStock;
             await variation.save({ transaction });
 
+            if (item.vendorId) {
+              const vendorStock = await VendorStock.findOne({
+                where: { vendorId: item.vendorId, variationId: item.variationId },
+                transaction
+              });
+              if (vendorStock) {
+                vendorStock.quantity = vendorStock.quantity + item.quantity;
+                await vendorStock.save({ transaction });
+              }
+            }
+
             await InventoryMovement.create({
               variationId: variation.id,
               quantityChanged: item.quantity,
@@ -591,6 +623,15 @@ const deleteOrder = async (req, res, next) => {
           const newStock = prevStock + item.quantity;
           variation.stockQuantity = newStock;
           await variation.save({ transaction });
+
+          const vendorStock = await VendorStock.findOne({
+            where: { vendorId: item.vendorId, variationId: item.variationId },
+            transaction
+          });
+          if (vendorStock) {
+            vendorStock.quantity = vendorStock.quantity + item.quantity;
+            await vendorStock.save({ transaction });
+          }
 
           await InventoryMovement.create({
             variationId: variation.id,

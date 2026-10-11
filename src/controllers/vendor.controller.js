@@ -8,7 +8,9 @@ const {
   ProductVariation,
   Product,
   InventoryMovement,
-  Order
+  Order,
+  VendorStock,
+  Media
 } = require('../models');
 
 // ==========================================
@@ -342,14 +344,14 @@ const getVendorDashboard = async (req, res, next) => {
       lowStockAlerts,
       bestSellers
     ] = await Promise.all([
-      Product.count({ where: { vendorId } }),
+      VendorStock.count({ where: { vendorId, quantity: { [Op.gt]: 0 } } }),
 
-      ProductVariation.findAll({
+      VendorStock.findAll({
+        where: { vendorId },
         include: [{
-          model: Product,
-          as: 'product',
-          where: { vendorId },
-          attributes: []
+          model: ProductVariation,
+          as: 'variation',
+          include: [{ model: Product, as: 'product', attributes: ['id', 'title'] }]
         }]
       }),
 
@@ -423,18 +425,17 @@ const getVendorDashboard = async (req, res, next) => {
         limit: 10
       }),
 
-      ProductVariation.findAll({
+      VendorStock.findAll({
         where: {
-          stockQuantity: { [Op.lte]: sequelize.col('low_stock_threshold') },
-          isActive: true
+          vendorId,
+          quantity: { [Op.lte]: 5 }
         },
         include: [{
-          model: Product,
-          as: 'product',
-          where: { vendorId },
-          attributes: ['id', 'title']
+          model: ProductVariation,
+          as: 'variation',
+          include: [{ model: Product, as: 'product', attributes: ['id', 'title'] }]
         }],
-        order: [['stockQuantity', 'ASC']],
+        order: [['quantity', 'ASC']],
         limit: 10
       }),
 
@@ -463,7 +464,15 @@ const getVendorDashboard = async (req, res, next) => {
       })
     ]);
 
-    const totalInventory = variations.reduce((sum, item) => sum + item.stockQuantity, 0);
+    const totalInventory = (variations || []).reduce((sum, item) => sum + (parseInt(item.quantity, 10) || 0), 0);
+
+    const formattedLowStockAlerts = (lowStockAlerts || []).map((s) => ({
+      id: s.id,
+      sku: s.variation?.sku || 'SKU',
+      stockQuantity: s.quantity,
+      lowStockThreshold: s.variation?.lowStockThreshold || 5,
+      product: s.variation?.product || { title: 'Unknown Product' }
+    }));
 
     const mappedOrders = recentOrders.map((order) => {
       const vendorItems = order.items || [];
@@ -511,9 +520,288 @@ const getVendorDashboard = async (req, res, next) => {
         monthlyTrends: monthlyEarnings,
         recentOrders: mappedOrders,
         recentLedger,
-        lowStockAlerts,
+        lowStockAlerts: formattedLowStockAlerts,
         bestSellers
       }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const VENDOR_POLICY_NOTE = 'Payment will be cleared after product is successfully received by the customer. If product has any problem or is not as described, all delivery charges will be paid by the vendor. Product should meet all the given details.';
+
+// @desc    Vendor Stock In for a selected product and SKU
+// @route   POST /api/vendors/stock/in
+// @access  Private (Vendor)
+const vendorStockIn = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  try {
+    if (req.user.role !== 'Vendor' || !req.user.vendorProfile) {
+      await transaction.rollback();
+      return res.status(403).json({ success: false, message: 'Access denied: Vendor account required' });
+    }
+
+    const vendorId = req.user.vendorProfile.id;
+    const { variationId, quantity, sellingPrice } = req.body;
+
+    if (!variationId) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'SKU variation selection is required' });
+    }
+
+    const qty = parseInt(quantity, 10);
+    if (!qty || qty <= 0) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Please provide a valid stock quantity (minimum 1)' });
+    }
+
+    const price = parseFloat(sellingPrice);
+    if (!price || price <= 0) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Please provide a valid selling price' });
+    }
+
+    // Find variation and its parent product
+    const variation = await ProductVariation.findByPk(variationId, {
+      include: [{ model: Product, as: 'product' }],
+      transaction
+    });
+
+    if (!variation) {
+      await transaction.rollback();
+      return res.status(404).json({ success: false, message: 'Selected SKU variation not found' });
+    }
+
+    // Check maxPriceCap if defined on variation or product
+    const effectiveCap = variation.maxPriceCap !== null && variation.maxPriceCap !== undefined
+      ? parseFloat(variation.maxPriceCap)
+      : (variation.product?.maxPriceCap ? parseFloat(variation.product.maxPriceCap) : null);
+
+    if (effectiveCap && price > effectiveCap) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `Selling price (Rs ${price}) exceeds the maximum price cap (Rs ${effectiveCap}) set for this game.`
+      });
+    }
+
+    // 10% platform fee calculation (e.g. 5k selling price -> 4.5k to vendor)
+    const commissionRate = 10.0;
+    const commissionFraction = commissionRate / 100.0;
+    const commissionPerUnit = parseFloat((price * commissionFraction).toFixed(2));
+    const vendorReceivesPerUnit = parseFloat((price - commissionPerUnit).toFixed(2));
+
+    // Find or create VendorStock
+    let vendorStock = await VendorStock.findOne({
+      where: { vendorId, variationId },
+      transaction
+    });
+
+    let previousVendorQty = 0;
+    let newVendorQty = qty;
+
+    if (vendorStock) {
+      previousVendorQty = vendorStock.quantity;
+      newVendorQty = previousVendorQty + qty;
+      vendorStock.quantity = newVendorQty;
+      vendorStock.sellingPrice = price;
+      vendorStock.vendorEarnings = vendorReceivesPerUnit;
+      vendorStock.commissionRate = commissionRate;
+      await vendorStock.save({ transaction });
+    } else {
+      vendorStock = await VendorStock.create({
+        vendorId,
+        variationId,
+        quantity: qty,
+        sellingPrice: price,
+        vendorEarnings: vendorReceivesPerUnit,
+        commissionRate: commissionRate
+      }, { transaction });
+    }
+
+    // Update global variation stock and cost price
+    const prevGlobalStock = variation.stockQuantity;
+    const newGlobalStock = prevGlobalStock + qty;
+    variation.stockQuantity = newGlobalStock;
+    variation.costPrice = vendorReceivesPerUnit;
+    if (!variation.price || parseFloat(variation.price) === 0) {
+      variation.price = price;
+    }
+    await variation.save({ transaction });
+
+    // Record Inventory Movement
+    await InventoryMovement.create({
+      variationId: variation.id,
+      quantityChanged: qty,
+      previousStock: prevGlobalStock,
+      newStock: newGlobalStock,
+      type: 'Restock',
+      notes: `Vendor "${req.user.vendorProfile.companyName}" Stock In: +${qty} units @ Rs ${price} (Vendor receives Rs ${vendorReceivesPerUnit}/unit) [Vendor Stock: ${newVendorQty}]`,
+      userId: req.user.id,
+      vendorId: vendorId
+    }, { transaction });
+
+    await transaction.commit();
+
+    const resultStock = await VendorStock.findByPk(vendorStock.id, {
+      include: [
+        {
+          model: ProductVariation,
+          as: 'variation',
+          include: [{ model: Product, as: 'product' }]
+        }
+      ]
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully stocked in ${qty} unit(s).`,
+      data: {
+        vendorStock: resultStock,
+        sellingPrice: price,
+        platformFeePercentage: commissionRate,
+        platformFeePerUnit: commissionPerUnit,
+        vendorReceivesPerUnit,
+        totalVendorReceives: parseFloat((vendorReceivesPerUnit * qty).toFixed(2)),
+        vendorStockQuantity: newVendorQty,
+        policyNote: VENDOR_POLICY_NOTE
+      }
+    });
+  } catch (error) {
+    await transaction.rollback();
+    next(error);
+  }
+};
+
+// @desc    Vendor Stock Out for a selected SKU (only for their own stock)
+// @route   POST /api/vendors/stock/out
+// @access  Private (Vendor)
+const vendorStockOut = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  try {
+    if (req.user.role !== 'Vendor' || !req.user.vendorProfile) {
+      await transaction.rollback();
+      return res.status(403).json({ success: false, message: 'Access denied: Vendor account required' });
+    }
+
+    const vendorId = req.user.vendorProfile.id;
+    const { variationId, quantity, reason } = req.body;
+
+    if (!variationId) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'SKU variation selection is required' });
+    }
+
+    const qty = parseInt(quantity, 10);
+    if (!qty || qty <= 0) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Please provide a valid stock quantity to remove (minimum 1)' });
+    }
+
+    const vendorStock = await VendorStock.findOne({
+      where: { vendorId, variationId },
+      include: [
+        {
+          model: ProductVariation,
+          as: 'variation',
+          include: [{ model: Product, as: 'product' }]
+        }
+      ],
+      transaction
+    });
+
+    if (!vendorStock || vendorStock.quantity <= 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'You have no stock recorded for this SKU'
+      });
+    }
+
+    if (vendorStock.quantity < qty) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `Cannot stock out ${qty} units. You only have ${vendorStock.quantity} unit(s) of your own stock.`
+      });
+    }
+
+    const prevVendorQty = vendorStock.quantity;
+    const newVendorQty = prevVendorQty - qty;
+    vendorStock.quantity = newVendorQty;
+    await vendorStock.save({ transaction });
+
+    // Update global variation stock
+    const variation = vendorStock.variation;
+    const prevGlobalStock = variation.stockQuantity;
+    const newGlobalStock = Math.max(0, prevGlobalStock - qty);
+    variation.stockQuantity = newGlobalStock;
+    await variation.save({ transaction });
+
+    // Record Inventory Movement
+    await InventoryMovement.create({
+      variationId: variation.id,
+      quantityChanged: -qty,
+      previousStock: prevGlobalStock,
+      newStock: newGlobalStock,
+      type: 'Correction',
+      notes: `Vendor "${req.user.vendorProfile.companyName}" Stock Out: -${qty} units (${reason || 'Withdrawn by vendor'}) [Remaining vendor stock: ${newVendorQty}]`,
+      userId: req.user.id,
+      vendorId: vendorId
+    }, { transaction });
+
+    await transaction.commit();
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully stocked out ${qty} unit(s).`,
+      data: {
+        vendorStock,
+        vendorStockQuantity: newVendorQty,
+        quantityRemoved: qty
+      }
+    });
+  } catch (error) {
+    await transaction.rollback();
+    next(error);
+  }
+};
+
+// @desc    Get all vendor stock records for logged-in vendor
+// @route   GET /api/vendors/stock/my-stock
+// @access  Private (Vendor)
+const getMyVendorStock = async (req, res, next) => {
+  try {
+    if (req.user.role !== 'Vendor' || !req.user.vendorProfile) {
+      return res.status(403).json({ success: false, message: 'Access denied: Vendor account required' });
+    }
+
+    const vendorId = req.user.vendorProfile.id;
+
+    const stocks = await VendorStock.findAll({
+      where: { vendorId },
+      include: [
+        {
+          model: ProductVariation,
+          as: 'variation',
+          include: [
+            {
+              model: Product,
+              as: 'product',
+              include: [{ model: Media, as: 'media' }]
+            }
+          ]
+        }
+      ],
+      order: [['updatedAt', 'DESC']]
+    });
+
+    res.json({
+      success: true,
+      count: stocks.length,
+      data: stocks,
+      policyNote: VENDOR_POLICY_NOTE
     });
   } catch (error) {
     next(error);
@@ -527,5 +815,9 @@ module.exports = {
   updateVendor,
   deleteVendor,
   settlePayout,
-  getVendorDashboard
+  getVendorDashboard,
+  vendorStockIn,
+  vendorStockOut,
+  getMyVendorStock,
+  VENDOR_POLICY_NOTE
 };

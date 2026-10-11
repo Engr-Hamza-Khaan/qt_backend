@@ -148,6 +148,13 @@ const getHomeData = async (req, res, next) => {
             hero: {
               ...DEFAULT_LANDING_PAGE.hero,
               ...(landingPageSetting?.value?.hero || {}),
+              sliderConfig: {
+                ...DEFAULT_LANDING_PAGE.hero.sliderConfig,
+                ...(landingPageSetting?.value?.hero?.sliderConfig || {}),
+                slides: (Array.isArray(landingPageSetting?.value?.hero?.sliderConfig?.slides) && landingPageSetting.value.hero.sliderConfig.slides.length > 0)
+                  ? landingPageSetting.value.hero.sliderConfig.slides
+                  : DEFAULT_LANDING_PAGE.hero.sliderConfig.slides,
+              },
             },
             productHeadings: {
               ...DEFAULT_LANDING_PAGE.productHeadings,

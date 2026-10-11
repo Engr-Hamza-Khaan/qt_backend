@@ -1,3 +1,4 @@
+const { Op } = require('sequelize');
 const { RepairRequest, SellRequest, ChatConversation, WebsiteSetting } = require('../models');
 
 // ==========================================
@@ -6,14 +7,38 @@ const { RepairRequest, SellRequest, ChatConversation, WebsiteSetting } = require
 
 const createRepairRequest = async (req, res, next) => {
   try {
-    const { customerName, customerEmail, customerPhone, description, mediaUrls } = req.body;
+    const {
+      customerName,
+      customerEmail,
+      customerPhone,
+      deviceType,
+      deviceModel,
+      issueType,
+      serialNumber,
+      accessoriesIncluded,
+      preferredContact,
+      priority,
+      description,
+      mediaUrls,
+      estimatedCost
+    } = req.body;
+
     const request = await RepairRequest.create({
       customerName,
       customerEmail,
       customerPhone,
+      deviceType: deviceType || 'Console',
+      deviceModel: deviceModel || null,
+      issueType: issueType || null,
+      serialNumber: serialNumber || null,
+      accessoriesIncluded: accessoriesIncluded || null,
+      preferredContact: preferredContact || 'Email',
+      priority: priority || 'Normal',
       description,
-      mediaUrls: mediaUrls || []
+      mediaUrls: Array.isArray(mediaUrls) ? mediaUrls : (mediaUrls ? [mediaUrls] : []),
+      estimatedCost: estimatedCost ? parseFloat(estimatedCost) : 0
     });
+
     res.status(201).json({ success: true, data: request });
   } catch (error) {
     next(error);
@@ -22,9 +47,21 @@ const createRepairRequest = async (req, res, next) => {
 
 const getRepairRequests = async (req, res, next) => {
   try {
-    const { status } = req.query;
+    const { status, search } = req.query;
     const where = {};
-    if (status) where.status = status;
+    if (status && status !== 'All') where.status = status;
+
+    if (search && search.trim()) {
+      const q = `%${search.trim()}%`;
+      where[Op.or] = [
+        { customerName: { [Op.iLike]: q } },
+        { customerEmail: { [Op.iLike]: q } },
+        { customerPhone: { [Op.iLike]: q } },
+        { deviceModel: { [Op.iLike]: q } },
+        { issueType: { [Op.iLike]: q } },
+        { description: { [Op.iLike]: q } },
+      ];
+    }
 
     const requests = await RepairRequest.findAll({ where, order: [['createdAt', 'DESC']] });
     res.json({ success: true, count: requests.length, data: requests });
@@ -41,6 +78,19 @@ const updateRepairRequest = async (req, res, next) => {
 
     await request.update(req.body);
     res.json({ success: true, data: request });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const deleteRepairRequest = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const request = await RepairRequest.findByPk(id);
+    if (!request) return res.status(404).json({ success: false, message: 'Repair request not found' });
+
+    await request.destroy();
+    res.json({ success: true, message: 'Repair ticket deleted successfully' });
   } catch (error) {
     next(error);
   }
@@ -258,6 +308,7 @@ module.exports = {
   createRepairRequest,
   getRepairRequests,
   updateRepairRequest,
+  deleteRepairRequest,
 
   createSellRequest,
   getSellRequests,

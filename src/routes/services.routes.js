@@ -4,6 +4,7 @@ const {
   createRepairRequest,
   getRepairRequests,
   updateRepairRequest,
+  deleteRepairRequest,
   createSellRequest,
   getSellRequests,
   updateSellRequest,
@@ -16,6 +17,21 @@ const {
 } = require('../controllers/services.controller');
 const { protect } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
+const upload = require('../middlewares/upload.middleware');
+
+// Public file/photo upload for repairs and service requests
+router.post('/upload', (req, res, next) => {
+  upload.array('files', 5)(req, res, (err) => {
+    if (err) return next(err);
+    const files = req.files || [];
+    const fileUrls = files.map(f => `/uploads/${f.filename}`);
+    res.json({
+      success: true,
+      fileUrls,
+      fileUrl: fileUrls[0] || null
+    });
+  });
+});
 
 // ==========================================
 // REPAIR SERVICES
@@ -24,7 +40,9 @@ router.route('/repairs')
   .post(createRepairRequest) // Public customer intake
   .get(protect, authorize('Admin', 'Super Admin', 'Staff'), getRepairRequests);
 
-router.put('/repairs/:id', protect, authorize('Admin', 'Super Admin', 'Staff'), updateRepairRequest);
+router.route('/repairs/:id')
+  .put(protect, authorize('Admin', 'Super Admin', 'Staff'), updateRepairRequest)
+  .delete(protect, authorize('Admin', 'Super Admin'), deleteRepairRequest);
 
 // ==========================================
 // SELL / TRADE-IN SERVICES

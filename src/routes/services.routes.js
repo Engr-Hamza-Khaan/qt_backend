@@ -7,7 +7,9 @@ const {
   deleteRepairRequest,
   createSellRequest,
   getSellRequests,
+  getPublicUsedConsoleAds,
   updateSellRequest,
+  deleteSellRequest,
   getChatConversations,
   getChatById,
   replyToChat,
@@ -45,13 +47,17 @@ router.route('/repairs/:id')
   .delete(protect, authorize('Admin', 'Super Admin'), deleteRepairRequest);
 
 // ==========================================
-// SELL / TRADE-IN SERVICES
+// SELL / TRADE-IN & USED CONSOLE ADS SERVICES
 // ==========================================
+router.get('/used-console-ads', getPublicUsedConsoleAds); // Public browsing of active 30-day ads
+
 router.route('/sell')
-  .post(createSellRequest) // Public customer trade-in
+  .post(createSellRequest) // Public customer ad/trade-in submission
   .get(protect, authorize('Admin', 'Super Admin', 'Staff'), getSellRequests);
 
-router.put('/sell/:id', protect, authorize('Admin', 'Super Admin', 'Staff'), updateSellRequest);
+router.route('/sell/:id')
+  .put(protect, authorize('Admin', 'Super Admin', 'Staff'), updateSellRequest)
+  .delete(protect, authorize('Admin', 'Super Admin'), deleteSellRequest);
 
 // ==========================================
 // CHATBOT & CUSTOMER DIALOGUE

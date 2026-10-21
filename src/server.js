@@ -12,6 +12,14 @@ const seedDatabase = async () => {
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
+  // Start HTTP server FIRST so Render detects the open port immediately
+  app.listen(PORT, () => {
+    console.log(`====================================================`);
+    console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+    console.log(`📖 Swagger API Docs: http://localhost:${PORT}/api-docs`);
+    console.log(`====================================================`);
+  });
+
   try {
     console.log('Connecting to database...');
     // Authenticate Sequelize connection
@@ -62,25 +70,14 @@ const startServer = async () => {
       console.log('Database already populated. Skipping seeding.');
     }
 
-    // Start listening
-    app.listen(PORT, () => {
-      console.log(`====================================================`);
-      console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
-      console.log(`📖 Swagger API Docs: http://localhost:${PORT}/api-docs`);
-      console.log(`====================================================`);
-    });
-
   } catch (error) {
-    console.error('Unable to start the server due to database error:', error);
-    
-    // Fallback if Postgres fails connection and we want to allow testing server code
+    console.error('Unable to connect to the database:', error);
     console.log('\n-------------------------------------------------------------');
     console.log('⚠️  DATABASE SETUP WARNING:');
     console.log('Please ensure PostgreSQL is running and credentials in .env are correct.');
     console.log('You can configure the DB connection parameters inside the .env file.');
     console.log('-------------------------------------------------------------\n');
-    
-    process.exit(1);
+    // Do NOT exit — server is already listening on PORT
   }
 };
 

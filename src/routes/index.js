@@ -13,7 +13,9 @@ const storefrontRoutes = require('./storefront.routes');
 const settingRoutes = require('./setting.routes');
 const searchRoutes = require('./search.routes');
 const invoiceRoutes = require('./invoice.routes');
+const healthRoutes = require('./health.routes');
 
+router.use('/health', healthRoutes);
 router.use('/auth', authRoutes);
 router.use('/store', storefrontRoutes);
 router.use('/store/search', searchRoutes);

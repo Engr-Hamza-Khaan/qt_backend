@@ -56,6 +56,19 @@ const VendorProfile = sequelize.define('VendorProfile', {
   status: {
     type: DataTypes.ENUM('Active', 'Suspended', 'Pending Approval'),
     defaultValue: 'Pending Approval'
+  },
+  allowedFeatures: {
+    type: DataTypes.JSONB,
+    allowNull: true,
+    defaultValue: {
+      usedConsoleAds: true,
+      stockManagement: true,
+      payoutRequests: true,
+      orderHistory: true,
+      productCatalog: true,
+      analytics: true
+    },
+    comment: 'Feature access permissions controlled by Super Admin'
   }
 });
 

@@ -10,7 +10,8 @@ const {
   InventoryMovement,
   Order,
   VendorStock,
-  Media
+  Media,
+  SellRequest
 } = require('../models');
 
 // ==========================================
@@ -135,7 +136,7 @@ const updateVendor = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   try {
     const { id } = req.params;
-    const { companyName, contactPerson, email, phone, address, status, name, phoneNumber, isActive } = req.body;
+    const { companyName, contactPerson, email, phone, address, status, name, phoneNumber, isActive, password } = req.body;
 
     const vendor = await VendorProfile.findByPk(id, {
       include: [{ model: User, as: 'user' }],
@@ -161,6 +162,7 @@ const updateVendor = async (req, res, next) => {
     if (phoneNumber !== undefined) userUpdates.phoneNumber = phoneNumber;
     else if (phone !== undefined) userUpdates.phoneNumber = phone;
     if (isActive !== undefined) userUpdates.isActive = isActive;
+    if (password && password.trim().length >= 6) userUpdates.password = password.trim();
 
     if (Object.keys(userUpdates).length > 0) {
       await vendor.user.update(userUpdates, { transaction });
@@ -808,6 +810,314 @@ const getMyVendorStock = async (req, res, next) => {
   }
 };
 
+// ==========================================
+// VENDOR 30-DAY USED CONSOLE ADS MANAGEMENT
+// ==========================================
+
+// @desc    Get all 30-day used console ads for authenticated vendor or admin
+// @route   GET /api/vendors/used-consoles
+// @access  Private (Vendor, Admin, Super Admin, Staff)
+const getVendorUsedConsoles = async (req, res, next) => {
+  try {
+    const isVendorRole = req.user.role === 'Vendor';
+    const vendorId = req.user.vendorProfile?.id;
+
+    if (isVendorRole && !vendorId) {
+      return res.status(403).json({ success: false, message: 'Vendor profile not found for user' });
+    }
+
+    const now = new Date();
+
+    const { status, adStatus, search, vendorId: filterVendorId } = req.query;
+    const where = {};
+
+    if (isVendorRole) {
+      where.vendorId = vendorId;
+    } else if (filterVendorId) {
+      where.vendorId = filterVendorId;
+    } else {
+      // Admin / Super Admin / Staff sees all vendor listings
+      where.sellerType = 'Vendor';
+    }
+
+    // Auto-disable expired ads
+    await SellRequest.update(
+      { adStatus: 'Expired', isAutoDisabled: true },
+      {
+        where: {
+          ...where,
+          adStatus: 'Active',
+          expiresAt: { [Op.lt]: now }
+        }
+      }
+    );
+
+    if (adStatus && adStatus !== 'All') where.adStatus = adStatus;
+    if (status && status !== 'All') where.status = status;
+
+    if (search) {
+      const cleanSearch = `%${search.trim().toLowerCase()}%`;
+      where[Op.or] = [
+        { productName: { [Op.iLike]: cleanSearch } },
+        { platform: { [Op.iLike]: cleanSearch } },
+        { brand: { [Op.iLike]: cleanSearch } },
+        { variant: { [Op.iLike]: cleanSearch } },
+        { modelNumber: { [Op.iLike]: cleanSearch } },
+        { description: { [Op.iLike]: cleanSearch } },
+        { vendorCompany: { [Op.iLike]: cleanSearch } }
+      ];
+    }
+
+    const ads = await SellRequest.findAll({
+      where,
+      order: [['createdAt', 'DESC']]
+    });
+
+    const decorated = ads.map((ad) => {
+      const plain = ad.toJSON ? ad.toJSON() : ad;
+      const isExpired = plain.expiresAt ? new Date(plain.expiresAt) < now : false;
+      const daysRemaining = plain.expiresAt
+        ? Math.max(0, Math.ceil((new Date(plain.expiresAt) - now) / (1000 * 60 * 60 * 24)))
+        : 0;
+
+      return {
+        ...plain,
+        isExpired,
+        daysRemaining
+      };
+    });
+
+    const counts = {
+      total: decorated.length,
+      active: decorated.filter(a => a.adStatus === 'Active' && !a.isExpired).length,
+      expired: decorated.filter(a => a.adStatus === 'Expired' || a.isExpired).length,
+      disabled: decorated.filter(a => a.adStatus === 'Disabled').length,
+      sold: decorated.filter(a => a.adStatus === 'Sold').length
+    };
+
+    res.json({
+      success: true,
+      counts,
+      count: decorated.length,
+      data: decorated
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Vendor or Admin posts a new 30-day Used Console Ad
+// @route   POST /api/vendors/used-consoles
+// @access  Private (Vendor, Admin, Super Admin, Staff)
+const createVendorUsedConsoleAd = async (req, res, next) => {
+  try {
+    const isVendorRole = req.user.role === 'Vendor';
+    const vendorProfile = req.user.vendorProfile;
+
+    if (isVendorRole && !vendorProfile) {
+      return res.status(403).json({ success: false, message: 'Vendor profile not found for user' });
+    }
+
+    const {
+      productName,
+      title,
+      platform,
+      brand,
+      variant,
+      modelNumber,
+      storage,
+      color,
+      edition,
+      placement,
+      condition,
+      accessoriesIncluded,
+      price,
+      description,
+      mediaUrls,
+      embedMedia,
+      tags,
+      keywords,
+      aliases,
+      city,
+      customerPhone,
+      phone,
+      preferredContact,
+      vendorId: specifiedVendorId,
+      vendorCompany: specifiedVendorCompany
+    } = req.body;
+
+    const finalProductName = productName || title || `${brand || ''} ${platform || ''} ${variant || ''}`.trim() || 'Used Console';
+    const now = new Date();
+    // 30 days active lifecycle
+    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const vendorId = vendorProfile?.id || specifiedVendorId || null;
+    const vendorCompany = vendorProfile?.companyName || specifiedVendorCompany || 'Quickturn Verified Supplier';
+    const contactName = vendorProfile?.companyName || vendorProfile?.contactPerson || req.user.name;
+    const contactEmail = vendorProfile?.email || req.user.email;
+    const contactPhone = customerPhone || phone || vendorProfile?.phone || req.user.phone || null;
+    const sellerCity = city || vendorProfile?.city || 'Karachi';
+
+    const ad = await SellRequest.create({
+      customerName: contactName,
+      customerEmail: contactEmail,
+      customerPhone: contactPhone,
+      city: sellerCity,
+      preferredContact: preferredContact || 'WhatsApp',
+      sellerType: 'Vendor',
+      vendorId,
+      vendorCompany,
+      userId: req.user.id,
+      listingType: 'Used Console Ad',
+      productName: finalProductName,
+      platform: platform || 'PS5',
+      brand: brand || 'Sony',
+      variant: variant || 'Slim',
+      modelNumber: modelNumber || null,
+      storage: storage || null,
+      color: color || null,
+      edition: edition || null,
+      placement: placement || 'Horizontal',
+      condition: condition || 'Used - Like New',
+      accessoriesIncluded: accessoriesIncluded || null,
+      price: price ? parseFloat(price) : null,
+      description: description || `${finalProductName} in ${condition || 'used'} condition posted by verified supplier ${vendorCompany}.`,
+      mediaUrls: Array.isArray(mediaUrls) ? mediaUrls : [],
+      embedMedia: embedMedia ? embedMedia.trim() : null,
+      tags: Array.isArray(tags) ? tags : (typeof tags === 'string' ? tags.split(',').map(t => t.trim()).filter(Boolean) : []),
+      keywords: Array.isArray(keywords) ? keywords : (typeof keywords === 'string' ? keywords.split(',').map(k => k.trim()).filter(Boolean) : []),
+      aliases: Array.isArray(aliases) ? aliases : (typeof aliases === 'string' ? aliases.split(',').map(a => a.trim()).filter(Boolean) : []),
+      expiresAt,
+      adStatus: 'Active',
+      isAutoDisabled: false,
+      status: 'Approved' // Vendor ads are verified & pre-approved
+    });
+
+    const plain = ad.toJSON ? ad.toJSON() : ad;
+    const daysRemaining = 30;
+
+    res.status(201).json({
+      success: true,
+      message: 'Used console ad published successfully for 30 days!',
+      data: {
+        ...plain,
+        daysRemaining,
+        isExpired: false
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Vendor or Admin updates ad / renews (+30 days) / toggles active status / marks sold
+// @route   PUT /api/vendors/used-consoles/:id
+// @access  Private (Vendor, Admin, Super Admin, Staff)
+const updateVendorUsedConsoleAd = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const isVendorRole = req.user.role === 'Vendor';
+    const where = { id };
+
+    if (isVendorRole) {
+      const vendorProfile = req.user.vendorProfile;
+      if (!vendorProfile) {
+        return res.status(403).json({ success: false, message: 'Vendor profile not found' });
+      }
+      where.vendorId = vendorProfile.id;
+    }
+
+    const ad = await SellRequest.findOne({ where });
+
+    if (!ad) {
+      return res.status(404).json({ success: false, message: 'Console ad not found or not owned by vendor' });
+    }
+
+    const updateData = { ...req.body };
+
+    // Action: Extend ad duration by 30 days
+    if (req.body.action === 'extend_30_days') {
+      const now = new Date();
+      updateData.expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      updateData.adStatus = 'Active';
+      updateData.isAutoDisabled = false;
+      delete updateData.action;
+    }
+
+    // Action: Toggle disable / enable
+    if (req.body.action === 'toggle_active') {
+      if (ad.adStatus === 'Active') {
+        updateData.adStatus = 'Disabled';
+      } else {
+        const now = new Date();
+        updateData.adStatus = 'Active';
+        updateData.isAutoDisabled = false;
+        if (!ad.expiresAt || new Date(ad.expiresAt) < now) {
+          updateData.expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+        }
+      }
+      delete updateData.action;
+    }
+
+    // Action: Mark as sold
+    if (req.body.action === 'mark_sold') {
+      updateData.adStatus = 'Sold';
+      delete updateData.action;
+    }
+
+    await ad.update(updateData);
+
+    const plain = ad.toJSON ? ad.toJSON() : ad;
+    const now = new Date();
+    const isExpired = plain.expiresAt ? new Date(plain.expiresAt) < now : false;
+    const daysRemaining = plain.expiresAt
+      ? Math.max(0, Math.ceil((new Date(plain.expiresAt) - now) / (1000 * 60 * 60 * 24)))
+      : 0;
+
+    res.json({
+      success: true,
+      message: 'Used console ad updated successfully',
+      data: {
+        ...plain,
+        isExpired,
+        daysRemaining
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Vendor or Admin deletes an ad
+// @route   DELETE /api/vendors/used-consoles/:id
+// @access  Private (Vendor, Admin, Super Admin, Staff)
+const deleteVendorUsedConsoleAd = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const isVendorRole = req.user.role === 'Vendor';
+    const where = { id };
+
+    if (isVendorRole) {
+      const vendorProfile = req.user.vendorProfile;
+      if (!vendorProfile) {
+        return res.status(403).json({ success: false, message: 'Vendor profile not found' });
+      }
+      where.vendorId = vendorProfile.id;
+    }
+
+    const ad = await SellRequest.findOne({ where });
+
+    if (!ad) {
+      return res.status(404).json({ success: false, message: 'Console ad not found or not owned by vendor' });
+    }
+
+    await ad.destroy();
+    res.json({ success: true, message: 'Console ad removed successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getVendors,
   getVendorById,
@@ -819,5 +1129,9 @@ module.exports = {
   vendorStockIn,
   vendorStockOut,
   getMyVendorStock,
+  getVendorUsedConsoles,
+  createVendorUsedConsoleAd,
+  updateVendorUsedConsoleAd,
+  deleteVendorUsedConsoleAd,
   VENDOR_POLICY_NOTE
 };

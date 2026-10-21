@@ -10,10 +10,23 @@ const {
   getVendorDashboard,
   vendorStockIn,
   vendorStockOut,
-  getMyVendorStock
+  getMyVendorStock,
+  getVendorUsedConsoles,
+  createVendorUsedConsoleAd,
+  updateVendorUsedConsoleAd,
+  deleteVendorUsedConsoleAd
 } = require('../controllers/vendor.controller');
 const { protect } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
+
+// Vendor Used Console Ads routes (Vendor and Admin/Staff management)
+router.route('/used-consoles')
+  .get(protect, authorize('Vendor', 'Admin', 'Super Admin', 'Staff'), getVendorUsedConsoles)
+  .post(protect, authorize('Vendor', 'Admin', 'Super Admin', 'Staff'), createVendorUsedConsoleAd);
+
+router.route('/used-consoles/:id')
+  .put(protect, authorize('Vendor', 'Admin', 'Super Admin', 'Staff'), updateVendorUsedConsoleAd)
+  .delete(protect, authorize('Vendor', 'Admin', 'Super Admin', 'Staff'), deleteVendorUsedConsoleAd);
 
 // Vendor Stock management routes (Vendor only)
 router.post('/stock/in', protect, authorize('Vendor'), vendorStockIn);

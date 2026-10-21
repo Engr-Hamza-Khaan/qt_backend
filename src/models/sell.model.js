@@ -34,6 +34,27 @@ const SellRequest = sequelize.define('SellRequest', {
     defaultValue: 'WhatsApp',
     comment: 'Preferred contact method: WhatsApp, Phone, Email'
   },
+  sellerType: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'Customer',
+    comment: 'Customer or Vendor'
+  },
+  vendorId: {
+    type: DataTypes.UUID,
+    allowNull: true,
+    comment: 'Associated VendorProfile ID if posted by vendor'
+  },
+  vendorCompany: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Vendor company name for verified vendor badge'
+  },
+  userId: {
+    type: DataTypes.UUID,
+    allowNull: true,
+    comment: 'User ID of submitter if logged in'
+  },
 
   // Category & Listing Type
   listingType: {

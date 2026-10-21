@@ -93,6 +93,14 @@ VendorStock.belongsTo(VendorProfile, { foreignKey: 'vendorId', as: 'vendor' });
 ProductVariation.hasMany(VendorStock, { foreignKey: 'variationId', as: 'vendorStocks', onDelete: 'CASCADE' });
 VendorStock.belongsTo(ProductVariation, { foreignKey: 'variationId', as: 'variation' });
 
+// VendorProfile <-> SellRequest (One-to-Many, for vendor used console ads)
+VendorProfile.hasMany(SellRequest, { foreignKey: 'vendorId', as: 'usedConsoleAds', onDelete: 'SET NULL' });
+SellRequest.belongsTo(VendorProfile, { foreignKey: 'vendorId', as: 'vendor' });
+
+// User <-> SellRequest (One-to-Many)
+User.hasMany(SellRequest, { foreignKey: 'userId', as: 'sellRequests', onDelete: 'SET NULL' });
+SellRequest.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
 module.exports = {
   sequelize,
   User,

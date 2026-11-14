@@ -1,4 +1,4 @@
-const { Op } = require('sequelize');
+const { Op } = require('../orm');
 const { Invoice, User, Order, ProductVariation, Product } = require('../models');
 
 // Helper to generate the next unique invoice number

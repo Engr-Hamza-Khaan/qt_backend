@@ -1,4 +1,4 @@
-const { DataTypes } = require('sequelize');
+const { DataTypes } = require('../orm');
 const bcrypt = require('bcryptjs');
 const sequelize = require('../config/db.config');
 

@@ -1,4 +1,4 @@
-const { Op } = require('sequelize');
+const { Op } = require('../orm');
 const { Product, ProductVariation, Category, Media, SearchTerm } = require('../models');
 
 // Helper to sanitize product variations

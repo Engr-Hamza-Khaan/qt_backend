@@ -21,45 +21,10 @@ const startServer = async () => {
   });
 
   try {
-    console.log('Connecting to database...');
-    // Authenticate Sequelize connection
+    console.log('Connecting to Redis...');
+    // Verify the Redis connection (Redis is schemaless, so there is nothing to migrate or alter)
     await sequelize.authenticate();
-    console.log('Database connection has been established successfully.');
-
-    // Synchronize models (alter schema to match models safely)
-    try {
-      await sequelize.sync({ alter: true });
-      console.log('Database tables synchronized successfully with alter.');
-    } catch (alterErr) {
-      console.warn('Sync alter notice (running safe column migration fallback):', alterErr.message);
-      
-      // Ensure missing tables are created first
-      await sequelize.sync();
-
-      // Safely check and add any missing columns across all models
-      const queryInterface = sequelize.getQueryInterface();
-      for (const modelName of Object.keys(sequelize.models)) {
-        const model = sequelize.models[modelName];
-        const tableName = model.getTableName();
-
-        try {
-          const tableDescription = await queryInterface.describeTable(tableName);
-          const modelAttributes = model.rawAttributes;
-
-          for (const [attrName, attrDef] of Object.entries(modelAttributes)) {
-            const columnName = attrDef.field || attrName;
-            if (!tableDescription[columnName]) {
-              console.log(`Adding missing column "${columnName}" to table "${tableName}"...`);
-              await queryInterface.addColumn(tableName, columnName, attrDef);
-              console.log(`Successfully added column "${columnName}" to "${tableName}".`);
-            }
-          }
-        } catch (tableErr) {
-          console.warn(`Could not sync columns for table ${tableName}:`, tableErr.message);
-        }
-      }
-      console.log('Safe database column migration completed successfully.');
-    }
+    console.log('Redis connection has been established successfully.');
 
     // Auto-seed database if empty
     const userCount = await User.count();
@@ -71,11 +36,11 @@ const startServer = async () => {
     }
 
   } catch (error) {
-    console.error('Unable to connect to the database:', error);
+    console.error('Unable to connect to Redis:', error);
     console.log('\n-------------------------------------------------------------');
     console.log('⚠️  DATABASE SETUP WARNING:');
-    console.log('Please ensure PostgreSQL is running and credentials in .env are correct.');
-    console.log('You can configure the DB connection parameters inside the .env file.');
+    console.log('Please ensure REDIS_URL in .env points to your Vercel/Upstash Redis instance.');
+    console.log('Example: REDIS_URL=rediss://default:<password>@<host>:<port>');
     console.log('-------------------------------------------------------------\n');
     // Do NOT exit — server is already listening on PORT
   }

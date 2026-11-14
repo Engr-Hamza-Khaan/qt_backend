@@ -1,4 +1,5 @@
-const { Op } = require('sequelize');
+const { Op } = require('../orm');
+const { bestSellersByVariation, dailyTotals } = require('../utils/aggregates');
 const {
   sequelize,
   User,
@@ -385,14 +386,12 @@ const getVendorDashboard = async (req, res, next) => {
           vendorId,
           type: 'Sale Credit',
           ...(hasDateRange ? { createdAt: dateWhere } : {})
-        },
-        attributes: [
-          [sequelize.fn('date_trunc', 'day', sequelize.col('created_at')), 'date'],
-          [sequelize.fn('sum', sequelize.col('amount')), 'earnings']
-        ],
-        group: [sequelize.fn('date_trunc', 'day', sequelize.col('created_at'))],
-        order: [[sequelize.fn('date_trunc', 'day', sequelize.col('created_at')), 'ASC']]
-      }),
+        }
+      }).then((rows) => dailyTotals(rows, {
+        dateOf: (r) => r.createdAt,
+        amountOf: (r) => r.amount,
+        amountKey: 'earnings'
+      })),
 
       Order.findAll({
         where: hasDateRange ? { createdAt: dateWhere } : {},
@@ -441,29 +440,27 @@ const getVendorDashboard = async (req, res, next) => {
         limit: 10
       }),
 
-      OrderItem.findAll({
-        attributes: [
-          'variationId',
-          [sequelize.fn('SUM', sequelize.col('OrderItem.quantity')), 'soldQuantity'],
-          [sequelize.fn('SUM', sequelize.literal('"OrderItem"."quantity" * "OrderItem"."cost_price"')), 'totalEarnings']
-        ],
-        where: {
-          vendorId,
-          orderId: {
-            [Op.in]: sequelize.literal(`(SELECT id FROM orders WHERE payment_status = 'Paid')`)
+      (async () => {
+        const paidOrders = await Order.findAll({ where: { paymentStatus: 'Paid' }, attributes: ['id'] });
+        const items = await OrderItem.findAll({
+          where: {
+            vendorId,
+            orderId: { [Op.in]: paidOrders.map((o) => o.id) },
+            ...(hasDateRange ? { createdAt: dateWhere } : {})
           },
-          ...(hasDateRange ? { createdAt: dateWhere } : {})
-        },
-        include: [{
-          model: ProductVariation,
-          as: 'variation',
-          include: [{ model: Product, as: 'product', attributes: ['title'] }]
-        }],
-        group: ['OrderItem.variation_id', 'variation.id', 'variation->product.id'],
-        order: [[sequelize.literal('"soldQuantity"'), 'DESC']],
-        limit: 5,
-        subQuery: false
-      })
+          include: [{
+            model: ProductVariation,
+            as: 'variation',
+            include: [{ model: Product, as: 'product', attributes: ['title'] }]
+          }]
+        });
+        return bestSellersByVariation(items, {
+          valueKey: 'totalEarnings',
+          valueOf: (item) => (item.costPrice === null || item.costPrice === undefined
+            ? null
+            : Number(item.quantity) * Number(item.costPrice))
+        });
+      })()
     ]);
 
     const totalInventory = (variations || []).reduce((sum, item) => sum + (parseInt(item.quantity, 10) || 0), 0);

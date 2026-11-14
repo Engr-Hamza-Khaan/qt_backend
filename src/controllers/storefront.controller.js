@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { Op } = require('sequelize');
+const { Op } = require('../orm');
 const { validateAndApplyCoupon } = require('../utils/discount.service');
 const { sendOrderEmails } = require('../utils/email.service');
 const {

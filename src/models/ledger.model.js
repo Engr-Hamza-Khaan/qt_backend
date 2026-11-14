@@ -1,4 +1,4 @@
-const { DataTypes } = require('sequelize');
+const { DataTypes } = require('../orm');
 const sequelize = require('../config/db.config');
 
 const SupplierLedger = sequelize.define('SupplierLedger', {

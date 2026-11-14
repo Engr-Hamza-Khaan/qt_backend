@@ -1,4 +1,4 @@
-const { Op } = require('sequelize');
+const { Op } = require('../orm');
 const { sequelize, Order, OrderItem, ProductVariation, Product, VendorProfile, SupplierLedger, InventoryMovement, User, VendorStock } = require('../models');
 const { validateAndApplyCoupon } = require('../utils/discount.service');
 const { sendOrderEmails } = require('../utils/email.service');

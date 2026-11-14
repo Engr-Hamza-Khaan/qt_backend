@@ -216,7 +216,7 @@ const seedDatabase = async () => {
       attributes: { platform: 'PS5' },
       isFeatured: true,
       status: 'Published',
-      vendorId: sonyVendor.id
+      vendorId: null // Sony vendor profile is disabled in this seeder (admin-owned product)
     });
 
     await ProductVariation.create({

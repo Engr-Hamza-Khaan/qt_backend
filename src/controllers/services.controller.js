@@ -1,4 +1,4 @@
-const { Op } = require('sequelize');
+const { Op } = require('../orm');
 const { RepairRequest, SellRequest, ChatConversation, WebsiteSetting } = require('../models');
 
 // ==========================================

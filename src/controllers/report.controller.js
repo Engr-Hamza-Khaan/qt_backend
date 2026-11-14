@@ -1,5 +1,6 @@
-const { Op } = require('sequelize');
-const { sequelize, Order, OrderItem, ProductVariation, Product, Category, User, VendorProfile } = require('../models');
+const { Op } = require('../orm');
+const { bestSellersByVariation, dailyTotals, fixed2 } = require('../utils/aggregates');
+const { Order, OrderItem, ProductVariation, Product, Category, User, VendorProfile } = require('../models');
 
 // @desc    Get dashboard metrics summary
 // @route   GET /api/reports/dashboard
@@ -14,13 +15,11 @@ const getDashboardSummary = async (req, res, next) => {
     const totalCustomersCount = await User.count({ where: { role: 'Customer' } });
     const totalVendorsCount = await VendorProfile.count({ where: { status: 'Active' } });
 
-    // 2. Total products sold quantity (subquery avoids Sequelize sum+include GROUP BY bug)
+    // 2. Total products sold quantity (items that belong to paid orders)
+    const paidOrders = await Order.findAll({ where: { paymentStatus: 'Paid' }, attributes: ['id'] });
+    const paidOrderIds = paidOrders.map((o) => o.id);
     const totalProductsSold = await OrderItem.sum('quantity', {
-      where: {
-        orderId: {
-          [Op.in]: sequelize.literal(`(SELECT id FROM orders WHERE payment_status = 'Paid')`)
-        }
-      }
+      where: { orderId: { [Op.in]: paidOrderIds } }
     }) || 0;
 
     // 3. Recent orders
@@ -33,7 +32,7 @@ const getDashboardSummary = async (req, res, next) => {
     // 4. Low stock alerts (where stock <= lowStockThreshold)
     const lowStockVariations = await ProductVariation.findAll({
       where: {
-        stockQuantity: { [Op.lte]: sequelize.col('low_stock_threshold') },
+        stockQuantity: { [Op.lte]: { __t: 'col', name: 'low_stock_threshold' } },
         isActive: true
       },
       include: [{ model: Product, as: 'product', attributes: ['title'] }],
@@ -41,57 +40,46 @@ const getDashboardSummary = async (req, res, next) => {
     });
 
     // 5. Best selling products (grouped by variation/product)
-    // Filter paid orders via subquery — including Order in GROUP BY queries causes
-    // PostgreSQL errors because Sequelize selects order.id outside aggregates.
-    const bestSellers = await OrderItem.findAll({
-      attributes: [
-        'variationId',
-        [sequelize.fn('SUM', sequelize.col('OrderItem.quantity')), 'soldQuantity'],
-        [sequelize.fn('SUM', sequelize.literal('"OrderItem"."quantity" * "OrderItem"."price"')), 'totalSales']
-      ],
-      where: {
-        orderId: {
-          [Op.in]: sequelize.literal(`(SELECT id FROM orders WHERE payment_status = 'Paid')`)
-        }
-      },
+    const paidItems = await OrderItem.findAll({
+      where: { orderId: { [Op.in]: paidOrderIds } },
       include: [
         {
           model: ProductVariation,
           as: 'variation',
           include: [{ model: Product, as: 'product', attributes: ['title'] }]
         }
-      ],
-      group: ['OrderItem.variation_id', 'variation.id', 'variation->product.id'],
-      order: [[sequelize.literal('"soldQuantity"'), 'DESC']],
-      limit: 5,
-      subQuery: false
+      ]
+    });
+    const bestSellers = bestSellersByVariation(paidItems, {
+      valueKey: 'totalSales',
+      valueOf: (item) => Number(item.quantity) * Number(item.price)
     });
 
     // 6. Sales trend (Last 30 Days)
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const salesTrend = await Order.findAll({
+    const recentPaidOrders = await Order.findAll({
       where: {
         paymentStatus: 'Paid',
         createdAt: { [Op.gte]: thirtyDaysAgo }
-      },
-      attributes: [
-        [sequelize.fn('date_trunc', 'day', sequelize.col('created_at')), 'date'],
-        [sequelize.fn('sum', sequelize.col('total_amount')), 'revenue'],
-        [sequelize.fn('count', sequelize.col('id')), 'orders']
-      ],
-      group: [sequelize.fn('date_trunc', 'day', sequelize.col('created_at'))],
-      order: [[sequelize.fn('date_trunc', 'day', sequelize.col('created_at')), 'ASC']]
+      }
+    });
+    const salesTrend = dailyTotals(recentPaidOrders, {
+      dateOf: (o) => o.createdAt,
+      amountOf: (o) => o.totalAmount,
+      amountKey: 'revenue',
+      countKey: 'orders'
     });
 
     // 7. Inventory Overview
-    const inventoryStats = await ProductVariation.findAll({
-      attributes: [
-        [sequelize.fn('SUM', sequelize.col('stock_quantity')), 'totalStock'],
-        [sequelize.fn('COUNT', sequelize.col('id')), 'totalSkus']
-      ]
-    });
+    const allVariations = await ProductVariation.findAll({ attributes: ['stockQuantity'] });
+    const inventoryStats = [{
+      totalStock: allVariations.length
+        ? String(allVariations.reduce((sum, v) => sum + (Number(v.stockQuantity) || 0), 0))
+        : null,
+      totalSkus: String(allVariations.length)
+    }];
 
     res.json({
       success: true,

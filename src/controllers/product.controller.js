@@ -1,4 +1,4 @@
-const { Op } = require('sequelize');
+const { Op } = require('../orm');
 const fs = require('fs');
 const path = require('path');
 const { uploadDir } = require('../middlewares/upload.middleware');

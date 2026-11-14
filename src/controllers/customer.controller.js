@@ -13,7 +13,7 @@ const getCustomers = async (req, res, next) => {
     }
 
     if (search) {
-      const { Op } = require('sequelize');
+      const { Op } = require('../orm');
       where[Op.or] = [
         { name: { [Op.iLike]: `%${search}%` } },
         { email: { [Op.iLike]: `%${search}%` } }

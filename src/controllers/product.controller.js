@@ -2,7 +2,7 @@ const { Op } = require('sequelize');
 const fs = require('fs');
 const path = require('path');
 const { uploadDir } = require('../middlewares/upload.middleware');
-const { sequelize, Product, ProductVariation, Category, Media, InventoryMovement, VendorProfile, VendorStock } = require('../models');
+const { sequelize, Product, ProductVariation, Category, Media, InventoryMovement, VendorProfile, VendorStock, OrderItem } = require('../models');
 
 // Helper to generate SKU: "QT-PLAT-COND-ID-RAND"
 const generateSKU = (platform, condition, title, extra = '') => {
@@ -254,6 +254,22 @@ const deleteProduct = async (req, res, next) => {
     const { id } = req.params;
     const product = await Product.findByPk(id);
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+    // Products that already appear on orders can't be hard-deleted (order history must stay intact).
+    const variationIds = (await ProductVariation.findAll({ where: { productId: id }, attributes: ['id'] })).map((v) => v.id);
+    const orderedCount = variationIds.length
+      ? await OrderItem.count({ where: { variationId: { [Op.in]: variationIds } } })
+      : 0;
+
+    if (orderedCount > 0) {
+      await product.update({ status: 'Hidden' });
+      await ProductVariation.update({ isActive: false }, { where: { productId: id } });
+      return res.json({
+        success: true,
+        archived: true,
+        message: 'This product has existing orders, so it was hidden from the store instead of being deleted.'
+      });
+    }
 
     await product.destroy();
     res.json({ success: true, message: 'Product deleted successfully' });
@@ -519,6 +535,7 @@ const getProductById = async (req, res, next) => {
 // ==========================================
 
 const addVariation = async (req, res, next) => {
+  const { productId } = req.params;
   if (req.user.role === 'Vendor') {
     return res.status(403).json({
       success: false,
@@ -672,6 +689,16 @@ const updateVariation = async (req, res, next) => {
     });
 
     if (!variation) return res.status(404).json({ success: false, message: 'Variation not found' });
+
+    const orderedCount = await OrderItem.count({ where: { variationId } });
+    if (orderedCount > 0) {
+      await variation.update({ isActive: false });
+      return res.json({
+        success: true,
+        archived: true,
+        message: 'This variation has existing orders, so it was deactivated instead of being deleted.'
+      });
+    }
 
     // Vendor checks
     if (req.user.role === 'Vendor' && variation.product.vendorId !== req.user.vendorProfile.id) {

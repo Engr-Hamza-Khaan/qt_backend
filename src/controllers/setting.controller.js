@@ -646,6 +646,40 @@ const updateLandingPageSetting = async (req, res, next) => {
   }
 };
 
+// GET /api/settings/navigation
+// Returns { items: [...] } or null when the admin hasn't customised the header menu yet.
+const getNavigationSetting = async (req, res, next) => {
+  try {
+    const setting = await WebsiteSetting.findOne({ where: { key: 'store_navigation' } });
+    res.json({ success: true, data: setting ? setting.value : null });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// PUT /api/settings/navigation
+const updateNavigationSetting = async (req, res, next) => {
+  try {
+    const { items } = req.body;
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, message: 'items array is required' });
+    }
+
+    const value = { items };
+    let setting = await WebsiteSetting.findOne({ where: { key: 'store_navigation' } });
+    if (setting) {
+      setting.value = value;
+      await setting.save();
+    } else {
+      setting = await WebsiteSetting.create({ key: 'store_navigation', value });
+    }
+
+    res.json({ success: true, message: 'Navigation saved successfully', data: setting.value });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // GET /api/settings/email/status
 const getEmailSettingStatus = async (req, res, next) => {
   try {
@@ -703,6 +737,8 @@ module.exports = {
   DEFAULT_POPUP_SETTING,
   getLandingPageSetting,
   updateLandingPageSetting,
+  getNavigationSetting,
+  updateNavigationSetting,
   DEFAULT_LANDING_PAGE,
   getEmailSettingStatus,
   sendTestNotificationEmail,

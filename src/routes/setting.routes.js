@@ -10,6 +10,8 @@ const {
   submitPopupLead,
   getLandingPageSetting,
   updateLandingPageSetting,
+  getNavigationSetting,
+  updateNavigationSetting,
   getEmailSettingStatus,
   sendTestNotificationEmail,
 } = require('../controllers/setting.controller');
@@ -20,6 +22,11 @@ router
   .route('/landing-page')
   .get(getLandingPageSetting)
   .put(protect, authorize('Admin', 'Super Admin', 'Staff'), updateLandingPageSetting);
+
+router
+  .route('/navigation')
+  .get(getNavigationSetting)
+  .put(protect, authorize('Admin', 'Super Admin', 'Staff'), updateNavigationSetting);
 
 router
   .route('/notification-bar')

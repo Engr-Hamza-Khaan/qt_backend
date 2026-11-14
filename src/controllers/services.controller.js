@@ -286,13 +286,18 @@ const getPublicUsedConsoleAds = async (req, res, next) => {
         { brand: { [Op.iLike]: cleanSearch } },
         { variant: { [Op.iLike]: cleanSearch } },
         { modelNumber: { [Op.iLike]: cleanSearch } },
-        { description: { [Op.iLike]: cleanSearch } },
-        { city: { [Op.iLike]: cleanSearch } }
+        { description: { [Op.iLike]: cleanSearch } }
       ];
     }
 
+    // Public listing: never expose seller (vendor/customer) identity or contact details.
     const ads = await SellRequest.findAll({
       where,
+      attributes: [
+        'id', 'listingType', 'productName', 'platform', 'brand', 'variant', 'modelNumber',
+        'storage', 'color', 'edition', 'placement', 'condition', 'accessoriesIncluded',
+        'price', 'description', 'mediaUrls', 'embedMedia', 'tags', 'expiresAt', 'createdAt'
+      ],
       order: [['createdAt', 'DESC']]
     });
 

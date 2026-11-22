@@ -12,6 +12,17 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 
+// CORS must come first so every response (including rate-limit and error
+// responses) carries the Access-Control-* headers, and preflights succeed.
+const corsOptions = {
+  origin: true, // reflect the request origin
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  credentials: true,
+  optionsSuccessStatus: 204,
+};
+app.use(cors(corsOptions)); // also answers OPTIONS preflights
+
 // Secure HTTP headers (allow cross-origin images for admin/store frontends)
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -21,6 +32,7 @@ app.use(helmet({
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 500, // Limit each IP to 500 requests per 15 mins
+  skip: (req) => req.method === 'OPTIONS',
   message: { success: false, message: 'Too many requests from this IP, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false
@@ -40,7 +52,6 @@ app.use('/api/auth/register', authLimiter);
 app.use('/api', apiLimiter);
 
 // Middlewares
-app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
